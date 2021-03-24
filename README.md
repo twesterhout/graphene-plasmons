@@ -5,4 +5,8 @@
 
 ### Hexagon with armchair boundaries
 
-![Explanation](./armchair_hexagon.png)
+![Explanation](./assets/armchair_hexagon.png)
+
+And this is what the code produces:
+
+![Example samples](./assets/example_samples.png)
