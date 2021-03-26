@@ -1,5 +1,6 @@
 using Plots
 using LinearAlgebra
+using HDF5: h5open
 
 
 struct SiteInfo{N} # , M}
@@ -135,4 +136,37 @@ function plot_lattice(sites::AbstractVector{<:SiteInfo})
         )
     end
     p
+end
+
+function build_hamiltonian(
+    ::Type{ℝ},
+    sites::AbstractVector{<:SiteInfo},
+    t₁::Real,
+) where {ℝ <: Real}
+    edges = nearest_neighbours(sites)
+    H = zeros(ℝ, length(sites), length(sites))
+    for (i, j) in edges
+        H[i, j] = -t₁
+        H[j, i] = -t₁
+    end
+    H
+end
+build_hamiltonian(sites::AbstractVector{<:SiteInfo}, t₁::Real) =
+    build_hamiltonian(Float64, sites, t₁)
+
+
+"""
+    single_layer_graphene_1626(output::AbstractString; t₁ = 2.7)
+
+Generate HDF5 file `output` which can be used as input for `Plasmons.jl`. The output file
+contains a single dataset -- tight-binding Hamiltonian for single layer graphene hexagon of
+1626 sites. Nearest-neighbour hopping parameter is `t₁` (all other hoppings are assumed to
+be 0).
+"""
+function single_layer_graphene_1626(output::AbstractString; t₁::Real = 2.7)
+    lattice = armchair_hexagon(10)
+    @assert length(lattice) == 1626
+    hamiltonian = build_hamiltonian(lattice, t₁)
+    h5open(io -> io["H"] = hamiltonian, output, "w")
+    nothing
 end
