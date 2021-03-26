@@ -17,21 +17,32 @@ function transform_to_real_space(
     qpoints::Int = 18,
     sublattices::Int = 2,
 )
-    (U_q, R₁, R₂, rs) = h5open(filename, "r") do io
+    (U_q, R₁, R₂, rs, ref_U_r) = h5open(filename, "r") do io
         # permutedims is needed to account for column-major order used by Julia
         shape = (qpoints, qpoints, sublattices, sublattices)
         U_q = reshape(permutedims(read(io["u_q"]), (3, 2, 1)), shape)
         # Symmetrize U_q!
-        U_q = (U_q .+ permutedims(U_q, (2, 1, 3, 4))) ./ 2
+        # U_q = (U_q .+ permutedims(U_q, (2, 1, 3, 4))) ./ 2
         (R₁, R₂, _) = mapslices(R -> tuple(R...), read(io["r_lattice"]), dims = [1])
         rs = reshape(
             mapslices(r -> tuple(r...), read(io["orbital_positions"]), dims = [1]),
             :,
         )
-        return U_q, R₁, R₂, rs
+        ref_U_r =
+            haskey(io, "u_r") ?
+            # NOTE: Why do we need (1, 2) instead of (2, 1) here? There seems to be an
+            # inconsistency between u_q and u_r
+            reshape(permutedims(read(io["u_r"]), (3, 1, 2)), shape) : nothing
+        return U_q, R₁, R₂, rs, ref_U_r
     end
     _U_r = ifft(U_q, [1, 2])
     @assert all(@. abs(imag(_U_r)) < 1e-4)
+    if !isnothing(ref_U_r)
+        @assert real.(_U_r) ≈ real.(ref_U_r)
+        # NOTE: In the following we should not have to use conj!
+        @info "" _U_r[1:4, 1:4, :, :] ref_U_r[1:4, 1:4, :, :]
+        @assert _U_r ≈ conj.(ref_U_r)
+    end
     U_r = real.(_U_r)
 
     δR = similar(U_r, eltype(U_r))
