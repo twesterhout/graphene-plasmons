@@ -3,14 +3,17 @@ using HDF5
 using LinearAlgebra
 using Plots
 
-pgfplotsx()
-theme(
-    :solarized_light;
-    fg = RGB(88 / 255, 110 / 255, 117 / 255),
-    fgtext = RGB(7 / 255, 54 / 255, 66 / 255),
-    fgguide = RGB(7 / 255, 54 / 255, 66 / 255),
-    fglegend = RGB(7 / 255, 54 / 255, 66 / 255),
-)
+
+function setup_plots()
+    pgfplotsx()
+    theme(
+        :solarized_light;
+        fg = RGB(88 / 255, 110 / 255, 117 / 255),
+        fgtext = RGB(7 / 255, 54 / 255, 66 / 255),
+        fgguide = RGB(7 / 255, 54 / 255, 66 / 255),
+        fglegend = RGB(7 / 255, 54 / 255, 66 / 255),
+    )
+end
 
 function transform_to_real_space(
     filename::AbstractString;
@@ -32,7 +35,8 @@ function transform_to_real_space(
             haskey(io, "u_r") ?
             # NOTE: Why do we need (1, 2) instead of (2, 1) here? There seems to be an
             # inconsistency between u_q and u_r
-            reshape(permutedims(read(io["u_r"]), (3, 1, 2)), shape) : nothing
+            reshape(permutedims(read(io["u_r"]), (3, 1, 2)), shape) :
+            nothing
         return U_q, R₁, R₂, rs, ref_U_r
     end
     _U_r = ifft(U_q, [1, 2])

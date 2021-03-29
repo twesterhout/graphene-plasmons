@@ -2,6 +2,8 @@ using Plots
 using LinearAlgebra
 using HDF5: h5open
 
+export single_layer_graphene_1626
+
 
 struct SiteInfo{N} # , M}
     position::NTuple{N, Float64}
@@ -155,18 +157,58 @@ build_hamiltonian(sites::AbstractVector{<:SiteInfo}, t₁::Real) =
     build_hamiltonian(Float64, sites, t₁)
 
 
+function density_of_states(eigenvalues::AbstractVector{<:Real}; σ::Real = 1e-1)
+    # NOTE: We divide by the number of eigenvalues here to ensure proper normalization
+    gaussian(x, μ) =
+        1 / (sqrt(2π) * σ * length(eigenvalues)) * exp(-1 / 2 * ((x - μ) / σ)^2)
+    Eₘᵢₙ = first(eigenvalues)
+    Eₘᵢₙ -= 1 / 20 * abs(Eₘᵢₙ) # Make the range slightly larger to see DoS go to zero
+    Eₘₐₓ = last(eigenvalues)
+    Eₘₐₓ += 1 / 20 * abs(Eₘₐₓ)
+    ΔE = (Eₘₐₓ - Eₘᵢₙ) / 1000
+    dos(x) = mapreduce(E -> gaussian(x, E), +, eigenvalues)
+    return Eₘᵢₙ:ΔE:Eₘₐₓ, dos
+end
+density_of_states(hamiltonian::Hermitian; kwargs...) =
+    density_of_states(eigvals(hamiltonian); kwargs...)
+density_of_states(hamiltonian::AbstractMatrix{<:Union{Real, Complex}}; kwargs...) =
+    density_of_states(Hermitian(hamiltonian); kwargs...)
+density_of_states(filename::AbstractString; dataset::AbstractString = "/H", kwargs...) =
+    h5open(io -> density_of_states(read(io[dataset]); kwargs...), filename, "r")
+
+function plot_density_of_states(Es::AbstractRange, dos::Function)
+    plot(
+        Es,
+        dos.(Es),
+        xlabel = raw"$E$, eV",
+        ylabel = raw"Density",
+        label = nothing,
+        size = (640, 480),
+        dpi = 300,
+    )
+end
+
+
 """
-    single_layer_graphene_1626(output::AbstractString; t₁ = 2.7)
+    single_layer_graphene_1626(output::AbstractString; t₁ = 2.7, dataset = "/H")
 
 Generate HDF5 file `output` which can be used as input for `Plasmons.jl`. The output file
 contains a single dataset -- tight-binding Hamiltonian for single layer graphene hexagon of
 1626 sites. Nearest-neighbour hopping parameter is `t₁` (all other hoppings are assumed to
 be 0).
 """
-function single_layer_graphene_1626(output::AbstractString; t₁::Real = 2.7)
+function single_layer_graphene_1626(
+    output::AbstractString;
+    t₁::Real = 2.7,
+    dataset::AbstractString = "/H",
+)
     lattice = armchair_hexagon(10)
     @assert length(lattice) == 1626
     hamiltonian = build_hamiltonian(lattice, t₁)
-    h5open(io -> io["H"] = hamiltonian, output, "w")
+    folder = dirname(output)
+    if !isdir(folder)
+        mkpath(folder)
+    end
+    h5open(io -> io[dataset] = hamiltonian, output, "w")
     nothing
 end
