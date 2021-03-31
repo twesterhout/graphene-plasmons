@@ -31,14 +31,17 @@ loss_function(χ::AbstractMatrix{<:Complex}, V::AbstractMatrix{<:Real}; kwargs..
 
 function dispersion(
     data,
-    lattice::AbstractVector{<:SiteInfo};
+    lattice::AbstractVector{<:SiteInfo},
+    sublattices::Tuple{Int, Int};
     δrs::AbstractVector{NTuple{3, Float64}},
     direction::NTuple{3, Float64} = NTuple{3, Float64}((1, 0, 0)),
     n::Int = 100,
 )
     @assert n > 1
     indices = choose_full_unit_cells(lattice; δrs = δrs)
-    lattice = lattice[indices]
+    left_indices = filter(i -> lattice[i].sublattice == sublattices[1], indices)
+    right_indices = filter(i -> lattice[i].sublattice == sublattices[2], indices)
+    lattice = lattice[left_indices]
     qs = collect(0:(π / (n - 1)):π)
     x = map(i -> i.position[1], lattice)
     y = map(i -> i.position[2], lattice)
@@ -46,7 +49,7 @@ function dispersion(
     ωs = Float64[]
     function transform(t)
         push!(ωs, t[1])
-        t[2][indices, indices]
+        t[2][left_indices, right_indices]
     end
     matrix = dispersion((transform(t) for t in data), map(q -> q .* direction, qs), x, y, z)
     return permutedims(matrix), qs, ωs
@@ -83,18 +86,29 @@ function plot_single_layer_graphene_polarizability()
     nothing
 end
 
-function single_layer_graphene_1626_polarizability_dispersion(filenames::AbstractVector{<:AbstractString}; output::AbstractString)
-    matrix, qs, ωs = dispersion(
-        all_matrices(filenames),
-        armchair_hexagon(10);
-        δrs = graphene_δrs,
-        direction = NTuple{3, Float64}((0, 1, 0)),
-        n = 100
-    )
+function single_layer_graphene_1626_polarizability_dispersion(
+    filenames::AbstractVector{<:AbstractString};
+    output::AbstractString,
+)
+    χs = []
+    qs = nothing
+    ωs = nothing
+    for sublattices in [(1, 1), (1, 2)]
+        m, qs, ωs = dispersion(
+            all_matrices(filenames),
+            armchair_hexagon(10),
+            sublattices;
+            δrs = graphene_δrs,
+            direction = NTuple{3, Float64}((1, 0, 0)),
+            n = 100,
+        )
+        push!(χs, m)
+    end
     h5open(output, "w") do io
         io["qs"] = qs
         io["ωs"] = ωs
-        io["χ"] = matrix
+        io["χᵃᵃ"] = χs[1]
+        io["χᵃᵇ"] = χs[2]
     end
     nothing
 end
