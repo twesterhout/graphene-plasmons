@@ -5,6 +5,12 @@ using HDF5: h5open
 export single_layer_graphene_1626
 
 
+const graphene_Rs =
+    (NTuple{3, Float64}((3 / 2, sqrt(3) / 2, 0)), NTuple{3, Float64}((0, sqrt(3), 0)))
+const graphene_δrs =
+    [NTuple{3, Float64}((0, 0, 0)), NTuple{3, Float64}((1 / 2, sqrt(3) / 2, 0))]
+
+
 struct SiteInfo{N} # , M}
     position::NTuple{N, Float64}
     sublattice::Int
@@ -66,6 +72,39 @@ function armchain_hexagon_constraints(k::Int)
 end
 
 """
+    choose_full_unit_cells(sites::AbstractVector{<:SiteInfo}; δrs) -> Vector{SiteInfo}
+
+Given a lattice choose only those sites which constitute full unit cells. `δrs` specifies
+positions of atoms within one unit cell.
+"""
+function choose_full_unit_cells(
+    sites::AbstractVector{SiteInfo{N}};
+    δrs::AbstractVector{NTuple{N, Float64}},
+) where {N}
+    function find_unit_cell(site::Int)::Union{Vector{Int}, Nothing}
+        sites[site].sublattice != 1 && return nothing
+        isclose(a, b) = mapreduce((x₁, x₂) -> isapprox(x₁, x₂), &, a, b)
+        cell = [site]
+        for i in 2:length(δrs)
+            r = sites[site].position .+ δrs[i]
+            predicate(x) = x.sublattice == i && isclose(x.position, r)
+            other = findfirst(predicate, sites)
+            isnothing(other) && return nothing
+            push!(cell, other)
+        end
+        cell
+    end
+
+    indices = Int[]
+    for cell in filter(!isnothing, map(find_unit_cell, 1:length(sites)))
+        for site in cell
+            push!(indices, site)
+        end
+    end
+    indices
+end
+
+"""
     nearest_neighbours(sites::AbstractVector{<:SiteInfo}) -> Vector{NTuple{2, Int}}
 
 Return a list of nearest neighbours. Indices of sites rather than their positions are
@@ -94,9 +133,8 @@ Construct a hexagon lattice with side length `k` with armchair boundaries.
 """
 function armchair_hexagon(k::Int)
     @assert k >= 1
-    R₁ = NTuple{3, Float64}((3 / 2, sqrt(3) / 2, 0))
-    R₂ = NTuple{3, Float64}((0, sqrt(3), 0))
-    δrs = [NTuple{3, Float64}((0, 0, 0)), NTuple{3, Float64}((1 / 2, sqrt(3) / 2, 0))]
+    R₁, R₂ = graphene_Rs
+    δrs = graphene_δrs
     n = 4 * (k - 1) + 1
     rhombus = square_lattice(n; R₁ = R₁, R₂ = R₂, δrs = δrs)
     constraints = armchain_hexagon_constraints(k)
