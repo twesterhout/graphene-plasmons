@@ -1,5 +1,6 @@
 using Plasmons
 import Plasmons.dispersion
+using LaTeXStrings
 using LinearAlgebra
 using HDF5
 using Plots
@@ -53,11 +54,12 @@ end
 
 function _plot_dispersion(matrix, qs, ωs; transform, title)
     heatmap(
-        qs,
+        qs ./ π,
         ωs,
         transform(matrix),
-        xlabel = raw"$q$, $1/a$",
+        xlabel = raw"$q$, $\pi/a$",
         ylabel = raw"$\hbar\omega$, eV",
+        clims = (0, 1000),
         title = title,
     )
 end
@@ -66,8 +68,20 @@ plot_polarizability_dispersion(matrix, qs, ωs) = _plot_dispersion(
     qs,
     ωs;
     transform = (@. χ -> -imag(χ)),
-    title = raw"$-\mathrm{Im}\left[\chi(q, \omega)\right]$",
+    title = L"$-\mathrm{Im}\left[\chi(q, \omega)\right]$",
 )
+
+function plot_single_layer_graphene_polarizability()
+    setup_plots()
+    χᵃᵃ, χᵃᵇ, qs, ωs = h5open("data/single_layer/polarizability_dispersion_1626_11.h5", "r") do io
+        read(io["χᵃᵃ"]), read(io["χᵃᵇ"]), read(io["qs"]), read(io["ωs"])
+    end
+    p₁ = plot_polarizability_dispersion(χᵃᵃ, qs, ωs)
+    p₂ = plot_polarizability_dispersion(χᵃᵇ, qs, ωs)
+    plot!(p₂, title = nothing)
+    savefig(plot(p₁, p₂, size=(800, 400)), "assets/single_layer/polarizability_dispersion.pdf")
+    nothing
+end
 
 function single_layer_graphene_1626_polarizability_dispersion(filenames::AbstractVector{<:AbstractString}; output::AbstractString)
     matrix, qs, ωs = dispersion(
