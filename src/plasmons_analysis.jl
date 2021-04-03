@@ -1,3 +1,4 @@
+using Glob
 using Plasmons
 import Plasmons.dispersion
 using LinearAlgebra
@@ -17,6 +18,43 @@ function all_matrices(filenames::AbstractVector{<:AbstractString}; group_name = 
     sort!(datasets; by = x -> x[1])
     return ((t[1], h5open(io -> read(io[t[3]]), t[2], "r")) for t in datasets)
 end
+
+function combine_outputs(
+    filenames::AbstractVector{<:AbstractString},
+    output::AbstractString,
+)
+    files = [h5open(f, "r") for f in filenames]
+    h5open(output, "w") do io
+        for group_name in ["/χ", "/ε"]
+            datasets = []
+            for file in files
+                if !haskey(file, group_name)
+                    continue
+                end
+                for d in file[group_name]
+                    ω = real(read(attributes(d), "ħω"))
+                    push!(datasets, (ω, file.filename, HDF5.name(d)))
+                end
+            end
+            if isempty(datasets)
+                continue
+            end
+            sort!(datasets; by = x -> x[1])
+            g = create_group(io, group_name)
+            for (i, (ω, filename, path)) in enumerate(datasets)
+                h5open(filename, "r") do input
+                    name = string(i, pad = 4)
+                    g[name] = read(input[path])
+                    attributes(g[name])["ħω"] = ω
+                end
+            end
+        end
+    end
+    nothing
+end
+combine_outputs(pattern::AbstractString, output::AbstractString) =
+    combine_outputs(glob(basename(pattern), dirname(pattern)), output)
+
 
 function loss_function(ϵ::AbstractVector{<:Complex}; count::Integer = 1)
     loss = sort!(@. imag(1 / ϵ))
