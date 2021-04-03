@@ -66,6 +66,26 @@ loss_function(ε::AbstractMatrix{<:Complex}; kwargs...) =
 loss_function(χ::AbstractMatrix{<:Complex}, V::AbstractMatrix{<:Real}; kwargs...) =
     loss_function(dielectric(χ, V); kwargs...)
 
+_group_for_observable(::Val{:χ}) = "/χ"
+_group_for_observable(::Val{:ε}) = "/ε"
+_sort_by_for_observable(::Val{:χ}) = χ -> -imag(χ)
+_sort_by_for_observable(::Val{:ε}) = ε -> -imag(1 / ε)
+
+function leading_eigenvalues(file::HDF5.File; observable::Symbol = :χ, count::Int = 1)
+    group = file[_group_for_observable(Val(observable))]
+    by = _sort_by_for_observable(Val(observable))
+    table = Array{Float64, 2}(undef, length(group), 1 + count)
+    for (i, d) in enumerate(group)
+        ħω = read(attributes(d), "ħω")
+        eigenvalues = eigvals!(read(d); sortby = by)
+        table[i, 1] = ħω
+        table[i, 2:end] .=
+            by.(view(eigenvalues, (length(eigenvalues) - (count - 1)):length(eigenvalues)))
+    end
+    table
+end
+leading_eigenvalues(filename::AbstractString; kwargs...) =
+    h5open(file -> leading_eigenvalues(file; kwargs...), filename, "r")
 
 function dispersion(
     data,
@@ -114,13 +134,17 @@ plot_polarizability_dispersion(matrix, qs, ωs) = _plot_dispersion(
 
 function plot_single_layer_graphene_polarizability()
     setup_plots()
-    χᵃᵃ, χᵃᵇ, qs, ωs = h5open("data/single_layer/polarizability_dispersion_1626_11.h5", "r") do io
-        read(io["χᵃᵃ"]), read(io["χᵃᵇ"]), read(io["qs"]), read(io["ωs"])
-    end
+    χᵃᵃ, χᵃᵇ, qs, ωs =
+        h5open("data/single_layer/polarizability_dispersion_1626_11.h5", "r") do io
+            read(io["χᵃᵃ"]), read(io["χᵃᵇ"]), read(io["qs"]), read(io["ωs"])
+        end
     p₁ = plot_polarizability_dispersion(χᵃᵃ, qs, ωs)
     p₂ = plot_polarizability_dispersion(χᵃᵇ, qs, ωs)
     plot!(p₂, title = nothing)
-    savefig(plot(p₁, p₂, size=(800, 400)), "assets/single_layer/polarizability_dispersion.pdf")
+    savefig(
+        plot(p₁, p₂, size = (800, 400)),
+        "assets/single_layer/polarizability_dispersion.pdf",
+    )
     nothing
 end
 
