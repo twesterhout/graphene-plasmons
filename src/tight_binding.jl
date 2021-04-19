@@ -3,6 +3,7 @@ using LinearAlgebra
 using HDF5: h5open
 
 export single_layer_graphene_1626
+export plot_example_zigzag_samples
 
 
 const graphene_Rs =
@@ -67,6 +68,19 @@ function armchain_hexagon_constraints(k::Int)
         below(line(-sqrt(3), 3 * sqrt(3) * L)),
         above(line(sqrt(3), -sqrt(3) * L)),
         below(line(sqrt(3), sqrt(3) * L)),
+    ]
+    return i -> mapfoldl(p -> p(i), &, constraints)
+end
+
+function zigzag_hexagon_constraints(k::Int)
+    @assert k >= 1
+    ε = 5 / 1000 # To avoid issues with float comparisons
+    line(a, b) = i -> i.position[2] - (a * i.position[1] + b)
+    above(f) = i -> f(i) >= -ε
+    below(f) = i -> f(i) <= ε
+    constraints = [
+        above(line(-1 / sqrt(3), sqrt(3) * (k - 1 / 2))),
+        below(line(-1 / sqrt(3), sqrt(3) * (3 * k + 1 / 2))),
     ]
     return i -> mapfoldl(p -> p(i), &, constraints)
 end
@@ -141,6 +155,16 @@ function armchair_hexagon(k::Int)
     return filter(constraints, rhombus)
 end
 
+function zigzag_hexagon(k::Int)
+    @assert k >= 1
+    R₁, R₂ = graphene_Rs
+    δrs = graphene_δrs
+    n = 2 * k
+    rhombus = square_lattice(n; R₁ = R₁, R₂ = R₂, δrs = δrs)
+    constraints = zigzag_hexagon_constraints(k)
+    return filter(constraints, rhombus)
+end
+
 function _make_edges_plottable(sites, edges)
     data = similar(edges, Float64, 3 * size(edges, 1), 2)
     for i in 1:length(edges)
@@ -157,13 +181,21 @@ end
 
 Visualize a lattice. Different sublattices are shown in different color.
 """
-function plot_lattice(sites::AbstractVector{<:SiteInfo})
+function plot_lattice(sites::AbstractVector{<:SiteInfo}; kwargs...)
     edges = nearest_neighbours(sites)
+
+    function limits(axis::Int)
+        (m, M) = extrema((i.position[axis] for i in sites))
+        return (m - 0.5, M + 0.5)
+    end
+
     p = plot(
         _make_edges_plottable(sites, edges)...,
         linecolor = :black,
         axis = ([], false),
         label = nothing,
+        xlims = limits(1),
+        ylims = limits(2),
         aspect_ratio = 1,
     )
     for a in 1:2
@@ -173,10 +205,30 @@ function plot_lattice(sites::AbstractVector{<:SiteInfo})
             map(i -> i.position[1], sublattice),
             map(i -> i.position[2], sublattice),
             label = nothing,
+            kwargs...,
         )
     end
     p
 end
+
+function plot_example_zigzag_samples(output::Union{AbstractString, Nothing} = nothing)
+    plotone(k; kwargs...) = plot_lattice(zigzag_hexagon(k); kwargs...)
+    p = plot(
+        plotone(1),
+        plotone(2),
+        plotone(3),
+        plotone(4),
+        layout = grid(1, 4, widths = [0.1, 0.2, 0.3, 0.4]),
+        size = (640, 260),
+    )
+    if isnothing(output)
+        return p
+    else
+        savefig(p, output)
+        return nothing
+    end
+end
+
 
 function build_hamiltonian(
     ::Type{ℝ},

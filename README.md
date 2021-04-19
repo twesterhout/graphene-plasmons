@@ -41,17 +41,39 @@ We can verify that we got the boundary conditions right by plotting density of
 states:
 
 ```julia
-setup_plots()
+setup_plots!()
 p = plot_density_of_states(density_of_states("data/single_layer/input_1626.h5", σ=0.1)...);
 savefig(p, "assets/single_layer/density_of_states_1626.png")
 ```
 
-![Density of states](./assets/single_layer/density_of_states_1626.png)
+<img src="./assets/single_layer/density_of_states_1626.png" width="640">
 
 Density of states indeed goes to zero at zero energy, i.e. we have a
 "semiconductor".
 
 
+### Constructing samples with zigzag boundaries
+
+```julia
+using GraphenePlasmons
+plot_example_zigzag_samples("assets/single_layer/example_zigzag_samples.png")
+```
+
+<img src="./assets/single_layer/example_zigzag_samples.png" width="640">
+
+
+
 ### Calculating polarizability χ(ω)
 
+| Parameter      | Value                  |
+|----------------|------------------------|
+| t              | 2.7 eV                 |
+| k<sub>kT</sub> | 0.0256 eV (i.e. 300 K) |
+| μ              | 0 eV                   |
+| η              | 0.001 eV               |
 
+[`run_cartesius.sh`](./tools/run_cartesius.sh) file shows an example SLURM
+script which can be used on Cartesius to calculate polarizability matrix χ for a
+variety of frequencies ω. It parallelizes the computation between 2 GPUs.
+Afterwards, `GraphenePlasmons.combine_outputs` function can be used to combine
+multiple HDF5 output files into one.
