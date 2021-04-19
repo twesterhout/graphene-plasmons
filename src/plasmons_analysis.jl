@@ -2,6 +2,7 @@ using Plasmons
 import Plasmons.dispersion
 using LaTeXStrings
 using LinearAlgebra
+using DSP
 using HDF5
 using Plots
 
@@ -55,34 +56,80 @@ function dispersion(
     return permutedims(matrix), qs, ωs
 end
 
-function _plot_dispersion(matrix, qs, ωs; transform, title)
+function padvalid(matrix::AbstractMatrix, n₁::Int, n₂::Int)
+    out = similar(matrix, size(matrix) .+ 2 .* (n₁, n₂))
+    (d₁, d₂) = size(matrix)
+    out[(n₁ + 1):(d₁ + n₁), (n₂ + 1):(d₂ + n₂)] .= matrix
+    out[(n₁ + 1):(d₁ + n₁), 1:n₂] .= view(matrix, :, 1:1)
+    out[(n₁ + 1):(d₁ + n₁), (d₂ + n₂ + 1):(d₂ + 2 * n₂)] .= view(matrix, :, d₂:d₂)
+    out[1:n₁, :] .= view(out, (n₁ + 1):(n₁ + 1), :)
+    out[(d₁ + n₁ + 1):(d₁ + 2 * n₂), :] .= view(out, (d₁ + n₁):(d₁ + n₁), :)
+    out
+end
+function smoothen(matrix::AbstractMatrix, kernel::AbstractMatrix)
+    @assert all(k -> mod(k, 2) == 1, size(kernel))
+    k = size(kernel)
+    out = conv(padvalid(matrix, div.(k, 2)...), kernel)[k[1]:(end - (k[1] - 1)), k[2]:(end - (k[2] - 1))]
+    @assert size(out) == size(matrix)
+    out
+end
+function smoothen(xs::AbstractMatrix; σ::Real = 3)
+    k₁ = min(round(6 * σ, RoundUp), size(xs, 1) - 1)
+    k₂ = min(round(6 * σ, RoundUp), size(xs, 2) - 1)
+    if mod(k₁, 2) == 0
+        k₁ += 1
+    end
+    if mod(k₂, 2) == 0
+        k₂ += 1
+    end
+    μ = (div(k₁ + 1, 2), div(k₂ + 1, 2))
+    kernel = similar(xs, eltype(xs), k₁, k₂)
+    for y in 1:k₂
+        for x in 1:k₁
+            kernel[x, y] = exp(- norm((x, y) .- μ)^2 / σ)
+        end
+    end
+    kernel ./= sum(kernel)
+    smoothen(xs, kernel)
+end
+
+function _plot_dispersion(matrix, qs, ωs; σ::Union{<:Real, Nothing} = nothing, transform, title)
+    matrix = transform(matrix)
+    matrix = clamp.(matrix, 0, 2000)
+    if !isnothing(σ)
+        matrix = smoothen(matrix, σ = σ)
+    end
     heatmap(
         qs ./ π,
         ωs,
-        transform(matrix),
+        matrix,
         xlabel = raw"$q$, $\pi/a$",
         ylabel = raw"$\hbar\omega$, eV",
-        clims = (0, 1000),
         title = title,
     )
 end
-plot_polarizability_dispersion(matrix, qs, ωs) = _plot_dispersion(
+plot_polarizability_dispersion(matrix, qs, ωs; kwargs...) = _plot_dispersion(
     matrix,
     qs,
     ωs;
     transform = (@. χ -> -imag(χ)),
     title = L"$-\mathrm{Im}\left[\chi(q, \omega)\right]$",
+    kwargs...
 )
 
 function plot_single_layer_graphene_polarizability()
-    setup_plots()
-    χᵃᵃ, χᵃᵇ, qs, ωs = h5open("data/single_layer/polarizability_dispersion_1626_11.h5", "r") do io
-        read(io["χᵃᵃ"]), read(io["χᵃᵇ"]), read(io["qs"]), read(io["ωs"])
-    end
-    p₁ = plot_polarizability_dispersion(χᵃᵃ, qs, ωs)
-    p₂ = plot_polarizability_dispersion(χᵃᵇ, qs, ωs)
+    χᵃᵃ, χᵃᵇ, qs, ωs =
+        h5open("data/single_layer/polarizability_dispersion_1626_11.h5", "r") do io
+            read(io["χᵃᵃ"]), read(io["χᵃᵇ"]), read(io["qs"]), read(io["ωs"])
+        end
+    p₁ = plot_polarizability_dispersion(χᵃᵃ, qs, ωs, σ = 3)
+    p₂ = plot_polarizability_dispersion(χᵃᵇ, qs, ωs, σ = 3)
+    plot!(p₁, colorbar = false)
     plot!(p₂, title = nothing)
-    savefig(plot(p₁, p₂, size=(800, 400)), "assets/single_layer/polarizability_dispersion.pdf")
+    savefig(
+        plot(p₁, p₂, size = (900, 400), dpi = 600),
+        "assets/single_layer/polarizability_dispersion.png",
+    )
     nothing
 end
 
