@@ -55,12 +55,21 @@ Density of states indeed goes to zero at zero energy, i.e. we have a
 ### Constructing samples with zigzag boundaries
 
 ```julia
-using GraphenePlasmons
 plot_example_zigzag_samples("assets/single_layer/example_zigzag_samples.png")
 ```
 
 <img src="./assets/single_layer/example_zigzag_samples.png" width="640">
 
+
+We can also compute the density of states:
+
+```julia
+single_layer_graphene_1633("data/single_layer/input_zigzag_1633.h5")
+plot_density_of_states(density_of_states("data/single_layer/input_zigzag_1633.h5", σ=0.09)...;
+                       output = "assets/single_layer/density_of_states_zigzag_1633.png")
+```
+
+<img src="./assets/single_layer/density_of_states_zigzag_1633.png" width="640">
 
 
 ### Calculating polarizability χ(ω)

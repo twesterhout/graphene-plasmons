@@ -4,6 +4,8 @@ using HDF5: h5open
 
 export single_layer_graphene_1626
 export plot_example_zigzag_samples
+export plot_density_of_states
+export armchair_hexagon, zigzag_hexagon
 
 
 const graphene_Rs =
@@ -266,16 +268,27 @@ density_of_states(hamiltonian::AbstractMatrix{<:Union{Real, Complex}}; kwargs...
 density_of_states(filename::AbstractString; dataset::AbstractString = "/H", kwargs...) =
     h5open(io -> density_of_states(read(io[dataset]); kwargs...), filename, "r")
 
-function plot_density_of_states(Es::AbstractRange, dos::Function)
-    plot(
+function plot_density_of_states(
+    Es::AbstractRange,
+    dos::Function;
+    output::Union{AbstractString, Nothing} = nothing,
+)
+    p = plot(
         Es,
         dos.(Es),
-        xlabel = raw"$E$, eV",
-        ylabel = raw"Density",
+        xlabel = raw"$E\,,\;\mathrm{eV}$",
+        ylabel = raw"DoS",
+        fontfamily = "Computer Modern",
+        lw = 2,
         label = nothing,
         size = (640, 480),
-        dpi = 300,
     )
+    if isnothing(output)
+        return p
+    else
+        savefig(p, output)
+        return nothing
+    end
 end
 
 
@@ -294,6 +307,22 @@ function single_layer_graphene_1626(
 )
     lattice = armchair_hexagon(10)
     @assert length(lattice) == 1626
+    hamiltonian = build_hamiltonian(lattice, t₁)
+    folder = dirname(output)
+    if !isdir(folder)
+        mkpath(folder)
+    end
+    h5open(io -> io[dataset] = hamiltonian, output, "w")
+    nothing
+end
+
+function single_layer_graphene_zigzag_1633(
+    output::AbstractString = nothing;
+    t₁::Real = 2.7,
+    dataset::AbstractString = "/H",
+)
+    lattice = zigzag_hexagon(16)
+    @assert length(lattice) == 1633
     hamiltonian = build_hamiltonian(lattice, t₁)
     folder = dirname(output)
     if !isdir(folder)
