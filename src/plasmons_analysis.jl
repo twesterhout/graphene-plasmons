@@ -1,3 +1,4 @@
+using Glob
 using Plasmons
 import Plasmons.dispersion
 using LaTeXStrings
@@ -20,6 +21,43 @@ function all_matrices(filenames::AbstractVector{<:AbstractString}; group_name = 
     return ((t[1], h5open(io -> read(io[t[3]]), t[2], "r")) for t in datasets)
 end
 
+function combine_outputs(
+    filenames::AbstractVector{<:AbstractString},
+    output::AbstractString,
+)
+    files = [h5open(f, "r") for f in filenames]
+    h5open(output, "w") do io
+        for group_name in ["/χ", "/ε"]
+            datasets = []
+            for file in files
+                if !haskey(file, group_name)
+                    continue
+                end
+                for d in file[group_name]
+                    ω = real(read(attributes(d), "ħω"))
+                    push!(datasets, (ω, file.filename, HDF5.name(d)))
+                end
+            end
+            if isempty(datasets)
+                continue
+            end
+            sort!(datasets; by = x -> x[1])
+            g = create_group(io, group_name)
+            for (i, (ω, filename, path)) in enumerate(datasets)
+                h5open(filename, "r") do input
+                    name = string(i, pad = 4)
+                    g[name] = read(input[path])
+                    attributes(g[name])["ħω"] = ω
+                end
+            end
+        end
+    end
+    nothing
+end
+combine_outputs(pattern::AbstractString, output::AbstractString) =
+    combine_outputs(glob(basename(pattern), dirname(pattern)), output)
+
+
 function loss_function(ϵ::AbstractVector{<:Complex}; count::Integer = 1)
     loss = sort!(@. imag(1 / ϵ))
     loss[start:count]
@@ -29,6 +67,26 @@ loss_function(ε::AbstractMatrix{<:Complex}; kwargs...) =
 loss_function(χ::AbstractMatrix{<:Complex}, V::AbstractMatrix{<:Real}; kwargs...) =
     loss_function(dielectric(χ, V); kwargs...)
 
+_group_for_observable(::Val{:χ}) = "/χ"
+_group_for_observable(::Val{:ε}) = "/ε"
+_sort_by_for_observable(::Val{:χ}) = χ -> -imag(χ)
+_sort_by_for_observable(::Val{:ε}) = ε -> -imag(1 / ε)
+
+function leading_eigenvalues(file::HDF5.File; observable::Symbol = :χ, count::Int = 1)
+    group = file[_group_for_observable(Val(observable))]
+    by = _sort_by_for_observable(Val(observable))
+    table = Array{Float64, 2}(undef, length(group), 1 + count)
+    for (i, d) in enumerate(group)
+        ħω = read(attributes(d), "ħω")
+        eigenvalues = eigvals!(read(d); sortby = by)
+        table[i, 1] = ħω
+        table[i, 2:end] .=
+            by.(view(eigenvalues, (length(eigenvalues) - (count - 1)):length(eigenvalues)))
+    end
+    table
+end
+leading_eigenvalues(filename::AbstractString; kwargs...) =
+    h5open(file -> leading_eigenvalues(file; kwargs...), filename, "r")
 
 function dispersion(
     data,

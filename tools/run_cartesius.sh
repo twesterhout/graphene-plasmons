@@ -12,9 +12,9 @@ kT=0.0256                # Temperature in eV
 mu=0                     # Chemical potential μ in eV
 damping=0.001            # Damping η in eV
 
-declare -a freq                   # Comma-separated list of frequencies ω in eV
-freq[0]=$(seq -s, 0.0 0.1 18.0)   # we split it into two parts since the node has
-freq[1]=$(seq -s, 0.05 0.1 18.05) # 2 gpus
+declare -a freq                     # Comma-separated list of frequencies ω in eV
+freq[0]=$(seq -s, 0.025 0.1 18.025) # we split it into two parts since the node has
+freq[1]=$(seq -s, 0.075 0.1 18.075) # 2 gpus
 
 # Generate input
 if [ ! -e data/single_layer/input_1626.h5 ]; then
