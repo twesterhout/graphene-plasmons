@@ -405,6 +405,7 @@ function plot_density_of_states(
     Es::AbstractRange,
     dos::Function;
     output::Union{AbstractString, Nothing} = nothing,
+    kwargs...,
 )
     p = plot(
         Es,
@@ -412,10 +413,11 @@ function plot_density_of_states(
         xlabel = raw"$E\,,\;\mathrm{eV}$",
         ylabel = raw"DoS",
         fontfamily = "computer modern",
-        lw = 3,
+        lw = 2,
         label = nothing,
         size = (640, 480),
-        dpi = 150
+        dpi = 150;
+        kwargs...,
     )
     if isnothing(output)
         return p
@@ -450,28 +452,65 @@ function single_layer_graphene_1626(
     nothing
 end
 
-function bilayer_graphene_3252(
-    output::AbstractString;
-    θ::Real = 0.0,
-    dataset::AbstractString = "/H",
-)
-    lattice = armchair_bilayer_hexagon(10, rotate = θ)
-    @assert length(lattice) == 3252
+function bilayer_graphene_hamiltonian(k::Int, θ::Real = 0)
+    lattice = armchair_bilayer_hexagon(k, rotate = θ)
     H = zeros(Float64, length(lattice), length(lattice))
-    for j in 1:size(H, 2)
-        for i in j+1:size(H, 1)
+    @inbounds for j in 1:size(H, 2)
+        for i in (j + 1):size(H, 1)
             rᵢⱼ = lattice[j].position .- lattice[i].position
             tᵢⱼ = slater_koster_prb_86_125413(rᵢⱼ)
             H[i, j] = tᵢⱼ
             H[j, i] = tᵢⱼ
         end
     end
+    tₘₐₓ = mapreduce(abs, max, H)
+    @inbounds for j in 1:size(H, 2)
+        @simd for i in 1:size(H, 1)
+            if abs(H[i, j]) < tₘₐₓ * eps(eltype(H))
+                H[i, j] = zero(eltype(H))
+            end
+        end
+    end
+    H
+end
+function bilayer_graphene(
+    k::Int,
+    output::AbstractString;
+    θ::Real = 0.0,
+    dataset::AbstractString = "/H",
+)
+    hamiltonian = bilayer_graphene_hamiltonian(k, θ)
     folder = dirname(output)
     if !isdir(folder)
         mkpath(folder)
     end
-    h5open(io -> io[dataset] = H, output, "w")
+    h5open(io -> io[dataset] = hamiltonian, output, "w")
     nothing
+    θ=0°
+end
+bilayer_graphene_3252(output; kwargs...) = bilayer_graphene(10, output; kwargs...)
+
+function plot_bilayer_graphene_density_of_states(
+    output::Union{AbstractString, Nothing} = nothing,
+)
+    plotone(θ; kwargs...) = plot_density_of_states(
+        density_of_states(bilayer_graphene_hamiltonian(10, θ); σ = 0.15)...;
+        kwargs...,
+    )
+    p = plot(
+        plotone(0, xlabel = "", title = raw"$\theta = 0\degree$"),
+        plotone(10, xlabel = "", ylabel = "", title = raw"$\theta = 10\degree$"),
+        plotone(20, title = raw"$\theta = 20\degree$"),
+        plotone(30, ylabel = "", title = raw"$\theta = 30\degree$"),
+        layout = grid(2, 2),
+        size = (640, 480),
+    )
+    if isnothing(output)
+        return p
+    else
+        savefig(p, output)
+        return nothing
+    end
 end
 
 function single_layer_graphene_zigzag_1633(
