@@ -5,12 +5,15 @@
 
 ### Hexagon with armchair boundaries
 
+<details><summary>Algorithm</summary><p>
+
 ![Explanation](./assets/armchair_hexagon.png)
 
 And this is what the code produces:
 
 ![Example samples](./assets/example_samples.png)
 
+</p></details>
 
 ## Single-layer graphene
 
@@ -51,8 +54,8 @@ savefig(p, "assets/single_layer/density_of_states_1626.png")
 Density of states indeed goes to zero at zero energy, i.e. we have a
 "semiconductor".
 
-
 ### Constructing samples with zigzag boundaries
+<details><summary>(ABSOLETE)</summary><p>
 
 ```julia
 plot_example_zigzag_samples("assets/single_layer/example_zigzag_samples.png")
@@ -71,6 +74,7 @@ plot_density_of_states(density_of_states("data/single_layer/input_zigzag_1633.h5
 
 <img src="./assets/single_layer/density_of_states_zigzag_1633.png" width="640">
 
+</p></details>
 
 ### Calculating polarizability χ(ω)
 
@@ -86,3 +90,19 @@ script which can be used on Cartesius to calculate polarizability matrix χ for 
 variety of frequencies ω. It parallelizes the computation between 2 GPUs.
 Afterwards, `GraphenePlasmons.combine_outputs` function can be used to combine
 multiple HDF5 output files into one.
+
+## Bilayer graphene
+
+### Constructing the sample
+
+<img src="./assets/bilayer/example_armchair_samples.png" width="640">
+
+
+### Density of states
+
+Density of states for various twisting angles θ. Compare θ=0° case to Fig. 10(b)
+from [PRB 86, 125413](https://doi.org/10.1103/PhysRevB.86.125413).
+
+<img src="./assets/bilayer/density_of_states_3252.png" width="640">
+
+### EELS
