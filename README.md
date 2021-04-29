@@ -106,3 +106,13 @@ from [PRB 86, 125413](https://doi.org/10.1103/PhysRevB.86.125413).
 <img src="./assets/bilayer/density_of_states_3252.png" width="640">
 
 ### EELS
+
+## Coulomb interaction
+
+Copying cRPA data:
+
+```sh
+rsync -zarv --prune-empty-dirs --include "*/"  --include="*.h5" --exclude="*" \
+    lilo.science.ru.nl:/vol/tcm13/sousapoza_adrian/cme/0?_* data/
+```
+
