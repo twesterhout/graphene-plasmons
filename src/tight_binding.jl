@@ -1,4 +1,5 @@
 using Plots
+using Plots.PlotMeasures
 using LinearAlgebra
 using HDF5: h5open
 
@@ -17,6 +18,18 @@ const graphene_Rs = (
 )
 const graphene_δrs =
     [NTuple{3, Float64}((0, 0, 0)), NTuple{3, Float64}((1 / 2, sqrt(3) / 2, 0))]
+
+const graphene_Gs = (
+    2π .* NTuple{3, Float64}((2 / 3, 0, 0)),
+    2π .* NTuple{3, Float64}((-1 / 3, 1 / sqrt(3), 0)),
+)
+
+const bilayer_graphene_δrs = [
+    NTuple{3, Float64}((0, 0, 0)),
+    NTuple{3, Float64}((1 / 2, sqrt(3) / 2, 0)),
+    NTuple{3, Float64}((1, 0, 0)) .+ graphene_Rs[3],
+    NTuple{3, Float64}((1 + 1 / 2, sqrt(3) / 2, 0)) .+ graphene_Rs[3],
+]
 
 
 struct SiteInfo{N} # , M}
@@ -353,10 +366,10 @@ function slater_koster_prb_86_125413(
         1 / (1 + exp((r - r_c) / l_c))
     end
     # q_σ / a₁ = q_π / a = 2.218 Å⁻¹
-    Vₚₚσ = let q_σ = 2.218 * a₁
+    Vₚₚσ = let q_σ = 2.218 * 1.418 * a₁
         γ₁ * exp(q_σ * (1 - r / a₁)) * Fc
     end
-    Vₚₚπ = let q_π = 2.218 * a
+    Vₚₚπ = let q_π = 2.218 * 1.418 * a
         -γ₀ * exp(q_π * (1 - r / a)) * Fc
     end
 
@@ -452,10 +465,10 @@ function single_layer_graphene_1626(
     nothing
 end
 
-function bilayer_graphene_hamiltonian(k::Int, θ::Real = 0)
-    lattice = armchair_bilayer_hexagon(k, rotate = θ)
+function slater_koster_hamiltonian(lattice::AbstractVector{<:SiteInfo}, Δe::Real = 0)
     H = zeros(Float64, length(lattice), length(lattice))
     @inbounds for j in 1:size(H, 2)
+        H[j, j] = Δe
         for i in (j + 1):size(H, 1)
             rᵢⱼ = lattice[j].position .- lattice[i].position
             tᵢⱼ = slater_koster_prb_86_125413(rᵢⱼ)
@@ -473,6 +486,10 @@ function bilayer_graphene_hamiltonian(k::Int, θ::Real = 0)
     end
     H
 end
+function bilayer_graphene_hamiltonian(k::Int, θ::Real = 0)
+    lattice = armchair_bilayer_hexagon(k, rotate = θ)
+    slater_koster_hamiltonian(lattice)
+end
 function bilayer_graphene(
     k::Int,
     output::AbstractString;
@@ -486,7 +503,6 @@ function bilayer_graphene(
     end
     h5open(io -> io[dataset] = hamiltonian, output, "w")
     nothing
-    θ=0°
 end
 bilayer_graphene_3252(output; kwargs...) = bilayer_graphene(10, output; kwargs...)
 

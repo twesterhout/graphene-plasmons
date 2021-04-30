@@ -114,6 +114,157 @@ function dispersion(
     return permutedims(matrix), qs, ωs
 end
 
+function dispersion(
+    A::AbstractMatrix,
+    qs::AbstractVector{NTuple{3, Float64}},
+    lattice::AbstractVector{<:SiteInfo},
+    δrs::AbstractVector{NTuple{3, Float64}},
+)
+    indices = choose_full_unit_cells(lattice; δrs = δrs)
+    out = similar(A, complex(eltype(A)), length(qs), length(δrs), length(δrs))
+    for a in 1:length(δrs)
+        idxᵃ = filter(i -> lattice[i].sublattice == a, indices)
+        rs = map(i -> i.position, lattice[idxᵃ])
+        for b in 1:length(δrs)
+            idxᵇ = filter(i -> lattice[i].sublattice == b, indices)
+            out[:, a, b] .= dispersion(A[idxᵃ, idxᵇ], qs, rs)
+        end
+    end
+    out
+end
+function dispersion(
+    H::AbstractMatrix,
+    lattice::AbstractVector{<:SiteInfo};
+    k₀::NTuple{3, Float64},
+    k₁::NTuple{3, Float64},
+    δrs::AbstractVector{NTuple{3, Float64}},
+    n::Int,
+)
+    @assert n > 1
+    qs = map(q -> k₀ .+ (k₁ .- k₀) .* q, 0:(1 / (n - 1)):1)
+    Hk = dispersion(H, qs, lattice, δrs)
+    Ek = similar(H, real(eltype(H)), size(Hk, 1), size(Hk, 2))
+    for i in 1:size(Hk, 1)
+        Ek[i, :] .= sort!(eigvals(Hermitian(Hk[i, :, :])))
+    end
+    Ek
+end
+
+function band_structure(
+    H::AbstractMatrix,
+    lattice::AbstractVector{<:SiteInfo};
+    ks::AbstractVector{NTuple{3, Float64}},
+    δrs::AbstractVector{NTuple{3, Float64}},
+    n::Int = 100,
+)
+    parts = []
+    for i in 1:(length(ks) - 1)
+        push!(parts, dispersion(H, lattice; k₀ = ks[i], k₁ = ks[i + 1], δrs = δrs, n = n))
+    end
+    vcat(parts...)
+end
+
+function graphene_high_symmetry_points(Gs = graphene_Gs)
+    k(i, j) = @. i * Gs[1] + j * Gs[2]
+    return (
+        [k(0, 0), k(1 / 2, 0), k(2 / 3, 1 / 3), k(0, 0)],
+        [raw"$\Gamma$", raw"$M$", raw"$K$", raw"$\Gamma$"],
+    )
+end
+function energy_at_dirac_point(
+    H::AbstractMatrix,
+    lattice::AbstractVector{<:SiteInfo};
+    Gs = graphene_Gs,
+    δrs = graphene_δrs,
+)
+    K = @. 2 / 3 * Gs[1] + 1 / 3 * Gs[2]
+    Hk = dispersion(H, [K], lattice, δrs)[1, :, :]
+    sum(eigvals(Hermitian(Hk))) / size(Hk, 1)
+end
+
+function plot_graphene_band_structure(k::Int; n::Int = 100, kwargs...)
+    lattice = armchair_hexagon(k)
+    H₁ = build_hamiltonian(lattice, 2.7)
+    H₂ = slater_koster_hamiltonian(lattice)
+
+    ks, ticks = graphene_high_symmetry_points()
+    Ek₁ = band_structure(H₁, lattice; ks = ks, δrs = graphene_δrs, n = n, kwargs...)
+    Ek₂ = band_structure(H₂, lattice; ks = ks, δrs = graphene_δrs, n = n, kwargs...)
+    Ek₂ .-= energy_at_dirac_point(H₂, lattice)
+    plot(
+        1:size(Ek₁, 1),
+        hcat(Ek₁, Ek₂);
+        xticks = ([1 + i * n for i in 0:(length(ks) - 1)], ticks),
+        ylabel = raw"$E\,,\;\mathrm{eV}$",
+        label = [raw"Nearest neighbor" "" raw"Slater-Koster" ""],
+        fontfamily = "computer modern",
+        lw = 2,
+        color = [1 1 2 2],
+        kwargs...
+    )
+end
+function plot_graphene_density_of_states(k::Int; σ::Real = 0.15, kwargs...)
+    lattice = armchair_hexagon(k)
+    H₁ = build_hamiltonian(lattice, 2.7)
+    H₂ = slater_koster_hamiltonian(lattice)
+    H₂[diagind(H₂)] .-= energy_at_dirac_point(H₂, lattice)
+
+    Es₁, dos₁ = density_of_states(H₁, σ = σ)
+    Es₂, dos₂ = density_of_states(H₂, σ = σ)
+
+    p = plot(
+        Es₁,
+        dos₁.(Es₁);
+        xlabel = raw"$E\,,\;\mathrm{eV}$",
+        ylabel = raw"DoS",
+        fontfamily = "computer modern",
+        lw = 2,
+        label = "Nearest neighbor",
+        kwargs...
+    )
+    plot!(p,
+        Es₂,
+        dos₂.(Es₂);
+        xlabel = raw"$E\,,\;\mathrm{eV}$",
+        ylabel = raw"DoS",
+        fontfamily = "computer modern",
+        lw = 2,
+        label = "Slater-Koster"
+    )
+    p
+end
+
+function plot_bilayer_graphene_electronic_structure(k::Int; n::Int = 100, σ::Real = 0.12)
+    lattice = armchair_bilayer_hexagon(k, rotate = 0)
+    H = slater_koster_hamiltonian(lattice)
+    H[diagind(H)] .-= energy_at_dirac_point(H, lattice, δrs = bilayer_graphene_δrs)
+
+    ks, ticks = graphene_high_symmetry_points()
+    Ek = band_structure(H, lattice; ks = ks, δrs = bilayer_graphene_δrs, n = n)
+    p₁ = plot(
+        1:size(Ek, 1),
+        Ek;
+        xticks = ([1 + i * n for i in 0:(length(ks) - 1)], ticks),
+        ylabel = raw"$E\,,\;\mathrm{eV}$",
+        label = "",
+        fontfamily = "computer modern",
+        color = [1 1 1 1],
+        lw = 1,
+    )
+
+    Es, dos = density_of_states(H, σ = σ)
+    p₂ = plot(
+        Es,
+        dos.(Es);
+        xlabel = raw"$E\,,\;\mathrm{eV}$",
+        ylabel = raw"DoS",
+        fontfamily = "computer modern",
+        lw = 1,
+        label = "",
+    )
+    plot(p₁, p₂, layout = grid(1, 2), left_margin=3mm, bottom_margin=3mm, size=(800, 300), dpi=150)
+end
+
 function padvalid(matrix::AbstractMatrix, n₁::Int, n₂::Int)
     out = similar(matrix, size(matrix) .+ 2 .* (n₁, n₂))
     (d₁, d₂) = size(matrix)
@@ -127,7 +278,10 @@ end
 function smoothen(matrix::AbstractMatrix, kernel::AbstractMatrix)
     @assert all(k -> mod(k, 2) == 1, size(kernel))
     k = size(kernel)
-    out = conv(padvalid(matrix, div.(k, 2)...), kernel)[k[1]:(end - (k[1] - 1)), k[2]:(end - (k[2] - 1))]
+    out = conv(padvalid(matrix, div.(k, 2)...), kernel)[
+        k[1]:(end - (k[1] - 1)),
+        k[2]:(end - (k[2] - 1)),
+    ]
     @assert size(out) == size(matrix)
     out
 end
@@ -144,14 +298,21 @@ function smoothen(xs::AbstractMatrix; σ::Real = 3)
     kernel = similar(xs, eltype(xs), k₁, k₂)
     for y in 1:k₂
         for x in 1:k₁
-            kernel[x, y] = exp(- norm((x, y) .- μ)^2 / σ)
+            kernel[x, y] = exp(-norm((x, y) .- μ)^2 / σ)
         end
     end
     kernel ./= sum(kernel)
     smoothen(xs, kernel)
 end
 
-function _plot_dispersion(matrix, qs, ωs; σ::Union{<:Real, Nothing} = nothing, transform, title)
+function _plot_dispersion(
+    matrix,
+    qs,
+    ωs;
+    σ::Union{<:Real, Nothing} = nothing,
+    transform,
+    title,
+)
     matrix = transform(matrix)
     matrix = clamp.(matrix, 0, 2000)
     if !isnothing(σ)
@@ -172,7 +333,7 @@ plot_polarizability_dispersion(matrix, qs, ωs; kwargs...) = _plot_dispersion(
     ωs;
     transform = (@. χ -> -imag(χ)),
     title = L"$-\mathrm{Im}\left[\chi(q, \omega)\right]$",
-    kwargs...
+    kwargs...,
 )
 
 function plot_single_layer_graphene_polarizability()
