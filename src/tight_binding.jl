@@ -14,7 +14,7 @@ const graphene_Rs = (
     NTuple{3, Float64}((0, sqrt(3), 0)),
     # Assume that carbon-carbon distance in graphene is 1.42... Å and interlayer distance is
     # 3.47... Å. TODO: Are these values consistent with cRPA?
-    NTuple{3, Float64}((0, 0, 3.4734 / 1.424919)),
+    NTuple{3, Float64}((0, 0, 3.35 / 1.424919)),
 )
 const graphene_δrs =
     [NTuple{3, Float64}((0, 0, 0)), NTuple{3, Float64}((1 / 2, sqrt(3) / 2, 0))]
@@ -465,22 +465,6 @@ function single_layer_graphene_1626(
     nothing
 end
 
-function bilayer_graphene_hamiltonian_from_dft()
-    tᵢₙₜᵣₐ = [
-        -0.991157, # onsite
-        -2.85655, # nearest neighbor
-        0.244362, # nest-nearest neighbor
-        -0.25776, # etc.
-        0.024267,
-        0.051976,
-        -0.020609,
-        -0.01445,
-        -0.021728,
-    ]
-    tᵢₙₜₑᵣ = [0.290394, 0.117477, 0.066704]
-
-end
-
 function nearest_neighbor_distances(lattice, n::Integer; scale::Real = 2)
     #!fmt: off
     lattice |>
@@ -523,6 +507,56 @@ function graphene_hamiltonian_from_dft(lattice::AbstractVector{<:SiteInfo})
     end
     H
 end
+
+function bilayer_graphene_hamiltonian_from_dft(lattice::AbstractVector{<:SiteInfo}; r₀::Real = graphene_Rs[3][3])
+    tᵢₙₜᵣₐ = [
+        -0.991157, # onsite
+        -2.85655, # nearest neighbor
+        0.244362, # nest-nearest neighbor
+        -0.25776, # etc.
+        0.024267,
+        0.051976,
+        -0.020609,
+        -0.01445,
+        -0.021728,
+    ]
+    dᵢₙₜᵣₐ = nearest_neighbor_distances(filter(i->i.sublattice <= 2, lattice), 8)
+
+    tᵢₙₜₑᵣ = [0.290394, 0.117477, 0.066704]
+    dᵢₙₜₑᵣ = [r₀, sqrt(r₀^2 + 1), sqrt(r₀^2 + 1)]
+
+    @. prb_99_205134(r, p) = tᵢₙₜₑᵣ[1] * exp(-p[1] * (r - r₀))
+    fit = curve_fit(prb_99_205134, dᵢₙₜₑᵣ, tᵢₙₜₑᵣ, [1.0])
+
+    H = zeros(Float64, length(lattice), length(lattice))
+    for j in 1:size(H, 2)
+        H[j, j] = tᵢₙₜᵣₐ[1]
+        for i in (j + 1):size(H, 1)
+            r = norm(lattice[j].position .- lattice[i].position)
+            if isapprox(lattice[i].position[3] - lattice[j].position[3], 0; atol=1e-5)
+                index = findfirst(d -> d ≈ r, dᵢₙₜᵣₐ)
+                if !isnothing(index)
+                    H[i, j] = tᵢₙₜᵣₐ[index + 1]
+                    H[j, i] = tᵢₙₜᵣₐ[index + 1]
+                end
+            else
+                t = prb_99_205134(r, fit.param)
+                H[i, j] = t
+                H[j, i] = t
+            end
+        end
+    end
+    tₘₐₓ = mapreduce(abs, max, H)
+    @inbounds for j in 1:size(H, 2)
+        @simd for i in 1:size(H, 1)
+            if abs(H[i, j]) < tₘₐₓ * eps(eltype(H))
+                H[i, j] = zero(eltype(H))
+            end
+        end
+    end
+    H
+end
+
 
 function graphene_hamiltonian_from_dft(lattice::AbstractVector{<:SiteInfo})
     # Automatically compute distances to the first n nearest neighbours

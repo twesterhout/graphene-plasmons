@@ -262,25 +262,30 @@ function plot_graphene_density_of_states(k::Int; σ::Real = 0.12, kwargs...)
     p
 end
 
-function plot_bilayer_graphene_electronic_structure(k::Int; n::Int = 100, σ::Real = 0.12)
+function plot_bilayer_graphene_electronic_structure(k::Int; n::Int = 50, σ::Real = 0.12)
     lattice = armchair_bilayer_hexagon(k, rotate = 0)
     H = slater_koster_hamiltonian(lattice)
     H[diagind(H)] .-= energy_at_dirac_point(H, lattice, δrs = bilayer_graphene_δrs)
+    H₂ = bilayer_graphene_hamiltonian_from_dft(lattice)
+    H₂[diagind(H₂)] .-= energy_at_dirac_point(H₂, lattice, δrs = bilayer_graphene_δrs)
 
     ks, ticks = graphene_high_symmetry_points()
-    Ek = band_structure(H, lattice; ks = ks, δrs = bilayer_graphene_δrs, n = n)
+    Ek, tick_locations = band_structure(H, lattice; ks = ks, δrs = bilayer_graphene_δrs, n = n)
+    Ek₂, _ = band_structure(H₂, lattice; ks = ks, δrs = bilayer_graphene_δrs, n = n)
     p₁ = plot(
-        1:size(Ek, 1),
-        Ek;
-        xticks = ([1 + i * n for i in 0:(length(ks) - 1)], ticks),
+        Ek[:, 1],
+        hcat(Ek[:, 2:end], Ek₂[:, 2:end]);
+        xticks = (tick_locations, ticks),
         ylabel = raw"$E\,,\;\mathrm{eV}$",
-        label = "",
+        label = ["Slater-Koster" "" "" "" "DFT" "" "" ""],
         fontfamily = "computer modern",
-        color = [1 1 1 1],
+        color = [1 1 1 1 2 2 2 2],
         lw = 1,
+        legend = :top,
     )
 
     Es, dos = density_of_states(H, σ = σ)
+    Es₂, dos₂ = density_of_states(H₂, σ = σ)
     p₂ = plot(
         Es,
         dos.(Es);
@@ -288,6 +293,11 @@ function plot_bilayer_graphene_electronic_structure(k::Int; n::Int = 100, σ::Re
         ylabel = raw"DoS",
         fontfamily = "computer modern",
         lw = 1,
+        label = "",
+    )
+    plot!(p₂,
+        Es₂,
+        dos₂.(Es₂);
         label = "",
     )
     plot(p₁, p₂, layout = grid(1, 2), left_margin=3mm, bottom_margin=3mm, size=(800, 300), dpi=150)
