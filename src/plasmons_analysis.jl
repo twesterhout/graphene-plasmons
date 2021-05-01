@@ -142,6 +142,7 @@ function dispersion(
 )
     @assert n > 1
     qs = map(q -> k₀ .+ (k₁ .- k₀) .* q, 0:(1 / (n - 1)):1)
+    @assert all(qs[1] .≈ k₀) && all(qs[end] .≈ k₁)
     Hk = dispersion(H, qs, lattice, δrs)
     Ek = similar(H, real(eltype(H)), size(Hk, 1), size(Hk, 2))
     for i in 1:size(Hk, 1)
@@ -158,18 +159,29 @@ function band_structure(
     n::Int = 100,
 )
     parts = []
+    ticks = []
+    scale = minimum((norm(ks[i + 1] .- ks[i]) for i in 1:length(ks) - 1))
+    offset = 0
     for i in 1:(length(ks) - 1)
-        push!(parts, dispersion(H, lattice; k₀ = ks[i], k₁ = ks[i + 1], δrs = δrs, n = n))
+        number_points = round(Int, norm(ks[i + 1] .- ks[i]) / scale * n)
+        xs = (offset + 1):(offset + number_points)
+        ys = dispersion(H, lattice; k₀ = ks[i], k₁ = ks[i + 1], δrs = δrs, n = number_points)
+        if i != length(ks) - 1
+            number_points -= 1
+        end
+        offset += number_points
+        push!(parts, hcat(xs, ys))
+        push!(ticks, xs[1])
     end
-    vcat(parts...)
+    push!(ticks, offset)
+    vcat(parts...), ticks
 end
 
 function graphene_high_symmetry_points(Gs = graphene_Gs)
     k(i, j) = @. i * Gs[1] + j * Gs[2]
-    return (
-        [k(0, 0), k(1 / 2, 0), k(2 / 3, 1 / 3), k(0, 0)],
-        [raw"$\Gamma$", raw"$M$", raw"$K$", raw"$\Gamma$"],
-    )
+    ks = [k(0, 0), k(1 / 2, 0), k(2 / 3, 1 / 3), k(0, 0)]
+    ticks = [raw"$\Gamma$", raw"$M$", raw"$K$", raw"$\Gamma$"]
+    ks, ticks
 end
 function energy_at_dirac_point(
     H::AbstractMatrix,
@@ -182,35 +194,42 @@ function energy_at_dirac_point(
     sum(eigvals(Hermitian(Hk))) / size(Hk, 1)
 end
 
-function plot_graphene_band_structure(k::Int; n::Int = 100, kwargs...)
-    lattice = armchair_hexagon(k)
-    H₁ = build_hamiltonian(lattice, 2.7)
-    H₂ = slater_koster_hamiltonian(lattice)
-
-    ks, ticks = graphene_high_symmetry_points()
-    Ek₁ = band_structure(H₁, lattice; ks = ks, δrs = graphene_δrs, n = n, kwargs...)
-    Ek₂ = band_structure(H₂, lattice; ks = ks, δrs = graphene_δrs, n = n, kwargs...)
-    Ek₂ .-= energy_at_dirac_point(H₂, lattice)
-    plot(
-        1:size(Ek₁, 1),
-        hcat(Ek₁, Ek₂);
-        xticks = ([1 + i * n for i in 0:(length(ks) - 1)], ticks),
-        ylabel = raw"$E\,,\;\mathrm{eV}$",
-        label = [raw"Nearest neighbor" "" raw"Slater-Koster" ""],
-        fontfamily = "computer modern",
-        lw = 2,
-        color = [1 1 2 2],
-        kwargs...
-    )
-end
-function plot_graphene_density_of_states(k::Int; σ::Real = 0.15, kwargs...)
+function plot_graphene_band_structure(k::Int; n::Int = 50, kwargs...)
     lattice = armchair_hexagon(k)
     H₁ = build_hamiltonian(lattice, 2.7)
     H₂ = slater_koster_hamiltonian(lattice)
     H₂[diagind(H₂)] .-= energy_at_dirac_point(H₂, lattice)
+    H₃ = graphene_hamiltonian_from_dft(lattice)
+    H₃[diagind(H₃)] .-= energy_at_dirac_point(H₃, lattice)
+
+    ks, ticks = graphene_high_symmetry_points()
+    Ek₁, tick_locations = band_structure(H₁, lattice; ks = ks, δrs = graphene_δrs, n = n, kwargs...)
+    Ek₂, _ = band_structure(H₂, lattice; ks = ks, δrs = graphene_δrs, n = n, kwargs...)
+    Ek₃, _ = band_structure(H₃, lattice; ks = ks, δrs = graphene_δrs, n = n, kwargs...)
+    plot(
+        Ek₁[:, 1],
+        hcat(Ek₁[:, 2:end], Ek₂[:, 2:end], Ek₃[:, 2:end]);
+        xticks = (tick_locations, ticks),
+        ylabel = raw"$E\,,\;\mathrm{eV}$",
+        label = ["Nearest-neighbor" "" "Slater-Koster" "" "DFT" ""],
+        fontfamily = "computer modern",
+        legend = :top,
+        lw = 2,
+        color = [1 1 2 2 3 3],
+        kwargs...
+    )
+end
+function plot_graphene_density_of_states(k::Int; σ::Real = 0.12, kwargs...)
+    lattice = armchair_hexagon(k)
+    H₁ = build_hamiltonian(lattice, 2.7)
+    H₂ = slater_koster_hamiltonian(lattice)
+    H₂[diagind(H₂)] .-= energy_at_dirac_point(H₂, lattice)
+    H₃ = graphene_hamiltonian_from_dft(lattice)
+    H₃[diagind(H₃)] .-= energy_at_dirac_point(H₃, lattice)
 
     Es₁, dos₁ = density_of_states(H₁, σ = σ)
     Es₂, dos₂ = density_of_states(H₂, σ = σ)
+    Es₃, dos₃ = density_of_states(H₃, σ = σ)
 
     p = plot(
         Es₁,
@@ -219,7 +238,7 @@ function plot_graphene_density_of_states(k::Int; σ::Real = 0.15, kwargs...)
         ylabel = raw"DoS",
         fontfamily = "computer modern",
         lw = 2,
-        label = "Nearest neighbor",
+        label = "",
         kwargs...
     )
     plot!(p,
@@ -229,7 +248,16 @@ function plot_graphene_density_of_states(k::Int; σ::Real = 0.15, kwargs...)
         ylabel = raw"DoS",
         fontfamily = "computer modern",
         lw = 2,
-        label = "Slater-Koster"
+        label = "",
+    )
+    plot!(p,
+        Es₃,
+        dos₃.(Es₃);
+        xlabel = raw"$E\,,\;\mathrm{eV}$",
+        ylabel = raw"DoS",
+        fontfamily = "computer modern",
+        lw = 2,
+        label = "",
     )
     p
 end

@@ -465,6 +465,93 @@ function single_layer_graphene_1626(
     nothing
 end
 
+function bilayer_graphene_hamiltonian_from_dft()
+    tᵢₙₜᵣₐ = [
+        -0.991157, # onsite
+        -2.85655, # nearest neighbor
+        0.244362, # nest-nearest neighbor
+        -0.25776, # etc.
+        0.024267,
+        0.051976,
+        -0.020609,
+        -0.01445,
+        -0.021728,
+    ]
+    tᵢₙₜₑᵣ = [0.290394, 0.117477, 0.066704]
+
+end
+
+function nearest_neighbor_distances(lattice, n::Integer; scale::Real = 2)
+    #!fmt: off
+    lattice |>
+    v -> Iterators.drop(v, 1) |>
+    v -> Iterators.map(i -> norm(first(lattice).position .- i.position), v) |>
+    v -> Iterators.map(d -> round(d; digits=10), v) |>
+    v -> Iterators.filter(d -> d < scale * n, v) |>
+    collect |> sort |> unique |>
+    v -> Iterators.take(v, n) |>
+    collect
+    #!fmt: on
+end
+
+function graphene_hamiltonian_from_dft(lattice::AbstractVector{<:SiteInfo})
+    # Data provided by Malte Roesner
+    ts = [
+        -2.433921,
+        -2.868647,
+        0.23901,
+        -0.263193,
+        0.023851,
+        0.051767,
+        -0.020566,
+        -0.015075,
+        -0.020681,
+    ]
+
+    distances = nearest_neighbor_distances(lattice, 8)
+    H = zeros(Float64, length(lattice), length(lattice))
+    for j in 1:size(H, 2)
+        H[j, j] = ts[1]
+        for i in (j + 1):size(H, 1)
+            r = norm(lattice[j].position .- lattice[i].position)
+            index = findfirst(d -> d ≈ r, distances)
+            if !isnothing(index)
+                H[i, j] = ts[index + 1]
+                H[j, i] = ts[index + 1]
+            end
+        end
+    end
+    H
+end
+
+function graphene_hamiltonian_from_dft(lattice::AbstractVector{<:SiteInfo})
+    # Automatically compute distances to the first n nearest neighbours
+    distances =
+        lattice |>
+        v -> Iterators.map(i -> norm(first(lattice).position .- i.position), v) |>
+        v -> Iterators.filter(d -> d < 10, v) |>
+        collect |>
+        sort |>
+        unique |>
+        v -> Iterators.take(v, 9) |>
+        collect
+    @info distances
+    tᵢₙₜᵣₐ = [
+        -2.433921,
+        -2.868647,
+        0.23901,
+        -0.263193,
+        0.023851,
+        0.051767,
+        -0.020566,
+        -0.015075,
+        -0.020681,
+    ]
+
+end
+
+
+
 function slater_koster_hamiltonian(lattice::AbstractVector{<:SiteInfo}, Δe::Real = 0)
     H = zeros(Float64, length(lattice), length(lattice))
     @inbounds for j in 1:size(H, 2)
