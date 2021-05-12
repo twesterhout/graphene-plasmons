@@ -98,12 +98,24 @@ multiple HDF5 output files into one.
 <img src="./assets/bilayer/example_armchair_samples.png" width="640">
 
 
-### Density of states
+### Electronic properties
 
-Density of states for various twisting angles θ. Compare θ=0° case to Fig. 10(b)
-from [PRB 86, 125413](https://doi.org/10.1103/PhysRevB.86.125413).
+**θ = 0°**:
 
-<img src="./assets/bilayer/density_of_states_3252.png" width="640">
+<img src="./assets/bilayer/electronic_properties_3252_0.png" width="640">
+
+**θ = 10°**:
+
+<img src="./assets/bilayer/electronic_properties_3252_10.png" width="640">
+
+**θ = 20°**:
+
+<img src="./assets/bilayer/electronic_properties_3252_20.png" width="640">
+
+**θ = 30°**:
+
+<img src="./assets/bilayer/electronic_properties_3252_30.png" width="640">
+
 
 ### EELS
 
