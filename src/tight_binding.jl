@@ -4,26 +4,39 @@ using LinearAlgebra
 using HDF5: h5open
 
 export single_layer_graphene_1626
-export plot_example_zigzag_samples
+export plot_example_zigzag_samples, plot_example_bilayer_samples
 export plot_density_of_states
 export armchair_hexagon, zigzag_hexagon
 
-
+"""
+Lattice vectors for graphene. Carbon-carbon distance is taken exactly `1`. Rescale them if
+necessary.
+"""
 const graphene_Rs = (
     NTuple{3, Float64}((3 / 2, sqrt(3) / 2, 0)),
     NTuple{3, Float64}((0, sqrt(3), 0)),
     # Assume that carbon-carbon distance in graphene is 1.42... Å and interlayer distance is
-    # 3.47... Å. TODO: Are these values consistent with cRPA?
+    # 3.35... Å.
     NTuple{3, Float64}((0, 0, 3.35 / 1.424919)),
 )
+
+"""
+Orbital positions within a unit cell for monolayer graphene.
+"""
 const graphene_δrs =
     [NTuple{3, Float64}((0, 0, 0)), NTuple{3, Float64}((1 / 2, sqrt(3) / 2, 0))]
 
+"""
+Reciprocal lattice vectors for monolayer graphene.
+"""
 const graphene_Gs = (
     2π .* NTuple{3, Float64}((2 / 3, 0, 0)),
     2π .* NTuple{3, Float64}((-1 / 3, 1 / sqrt(3), 0)),
 )
 
+"""
+Orbital positions within a unit cell for AB-stacked bilayer graphene.
+"""
 const bilayer_graphene_δrs = [
     NTuple{3, Float64}((0, 0, 0)),
     NTuple{3, Float64}((1 / 2, sqrt(3) / 2, 0)),
@@ -31,36 +44,47 @@ const bilayer_graphene_δrs = [
     NTuple{3, Float64}((1 + 1 / 2, sqrt(3) / 2, 0)) .+ graphene_Rs[3],
 ]
 
+"""
+    SiteInfo{N}
 
-struct SiteInfo{N} # , M}
+All we need to know about a site. Contains two fields:
+
+  * `position` specifies position of the site in N-dimensional space;
+  * `sublattice` specifies the sublattice to which the site belongs.
+"""
+struct SiteInfo{N}
     position::NTuple{N, Float64}
     sublattice::Int
-    # tag::NTuple{M, Int}
 end
-# SiteInfo(p::NTuple{N, Float64}, i::Int, t::NTuple{M, Int}) where {N, M} =
-#     M == N + 1 ? SiteInfo{N, N + 1}(p, i, t) : TypeError("expected M == N + 1")
 
 """
-    square_lattice(n; R₁, R₂, δrs) -> Vector{SiteInfo}
+    Lattice{N}
+
+A lattice is just a collection of sites, i.e. of `SiteInfo`.
+"""
+const Lattice{N} = AbstractVector{SiteInfo{N}}
+
+"""
+    square_lattice(n; R₁, R₂, δrs) -> Lattice
 
 Create a square lattice with given lattice vectors `R₁`, `R₂` and orbital positions `δrs`.
 """
 function square_lattice(
-    n::Int;
+    n::Integer;
     R₁::NTuple{N, Float64},
     R₂::NTuple{N, Float64},
     δrs::AbstractVector{NTuple{N, Float64}},
 ) where {N}
-    @assert n >= 1
+    if n < 1
+        throw(ArgumentError("invalid 'n': $n; expected a positive integer"))
+    end
     dim = n + 1
     lattice = Vector{SiteInfo{N}}(undef, length(δrs) * dim^2)
-    # Vector{SiteInfo{N, N + 1}}(undef, length(δrs) * dim^2)
     offset = 1
     for y in 0:n
         for x in 0:n
             for (i, δr) in enumerate(δrs)
-                R = @. R₁ * x + R₂ * y + δr
-                lattice[offset] = SiteInfo(R, i) # SiteInfo(R, i, (x, y, 0, i))
+                lattice[offset] = SiteInfo(NTuple(@. R₁ * x + R₂ * y + δr), i)
                 offset += 1
             end
         end
@@ -112,13 +136,13 @@ function zigzag_hexagon_constraints(k::Int)
 end
 
 """
-    choose_full_unit_cells(sites::AbstractVector{<:SiteInfo}; δrs) -> Vector{SiteInfo}
+    choose_full_unit_cells(sites::Lattice; δrs) -> Lattice
 
 Given a lattice choose only those sites which constitute full unit cells. `δrs` specifies
 positions of atoms within one unit cell.
 """
 function choose_full_unit_cells(
-    sites::AbstractVector{SiteInfo{N}};
+    sites::Lattice{N};
     δrs::AbstractVector{NTuple{N, Float64}},
 ) where {N}
     function find_unit_cell(site::Int)::Union{Vector{Int}, Nothing}
@@ -145,13 +169,15 @@ function choose_full_unit_cells(
 end
 
 """
-    nearest_neighbours(sites::AbstractVector{<:SiteInfo}) -> Vector{NTuple{2, Int}}
+    nearest_neighbours(sites::Lattice)
+    nearest_neighbours(sites::Lattice, system::Symbol) -> Vector{NTuple{2, Int}}
+    nearest_neighbours(sites::Lattice, condition::Function) -> Vector{NTuple{2, Int}}
 
 Return a list of nearest neighbours. Indices of sites rather than their positions are
 returned. Also note that this list does not contain duplicates, i.e. of `(i, j)` and `(j,
 i)` only one is returned.
 """
-function nearest_neighbours(sites::AbstractVector{<:SiteInfo}, condition::Function)
+function nearest_neighbours(sites::Lattice, condition::Function)
     edges = NTuple{2, Int}[]
     for i in 1:length(sites)
         for j in (i + 1):length(sites)
@@ -162,7 +188,7 @@ function nearest_neighbours(sites::AbstractVector{<:SiteInfo}, condition::Functi
     end
     edges
 end
-function nearest_neighbours(sites::AbstractVector{<:SiteInfo}, system::Symbol)
+function nearest_neighbours(sites::Lattice, system::Symbol)
     ε = 1 / 1000
     cutoff = 1 + ε
     distance(i, j) = norm(sites[i].position .- sites[j].position)
@@ -178,16 +204,16 @@ function nearest_neighbours(sites::AbstractVector{<:SiteInfo}, system::Symbol)
         throw(ArgumentError("invalid system: $system; expected either :single_layer or :bilayer"))
     end
 end
-nearest_neighbours(sites::AbstractVector{SiteInfo{N}}) where {N} =
+nearest_neighbours(sites::Lattice{N}) where {N} =
     N < 3 ? nearest_neighbours(sites, :single_layer) : nearest_neighbours(sites, :bilayer)
 
 """
-    armchair_hexagon(k::Int) -> Vector{SiteInfo}
+    armchair_hexagon(k::Int) -> Lattice{3}
 
 Construct a hexagon lattice with side length `k` with armchair boundaries.
 """
-function armchair_hexagon(k::Int)
-    @assert k >= 1
+function armchair_hexagon(k::Integer)
+    k < 1 && throw(ArgumentError("invalid 'k': $k; expected a positive integer."))
     R₁, R₂, _ = graphene_Rs
     δrs = graphene_δrs
     n = 4 * (k - 1) + 1
@@ -197,12 +223,12 @@ function armchair_hexagon(k::Int)
 end
 
 """
-    zigzag_hexagon(k::Int) -> Vector{SiteInfo}
+    zigzag_hexagon(k::Int) -> Lattice{3}
 
 Construct a hexagon lattice with side length `k` with zigzag boundaries.
 """
-function zigzag_hexagon(k::Int)
-    @assert k >= 1
+function zigzag_hexagon(k::Integer)
+    k < 1 && throw(ArgumentError("invalid 'k': $k; expected a positive integer."))
     R₁, R₂, _ = graphene_Rs
     δrs = graphene_δrs
     n = 2 * k
@@ -211,12 +237,8 @@ function zigzag_hexagon(k::Int)
     return filter(constraints, rhombus)
 end
 
-function shift_sample(
-    sites::AbstractVector{SiteInfo{N}};
-    shift::NTuple{N, Float64},
-) where {N}
+shift_sample(sites::AbstractVector{SiteInfo{N}}; shift::NTuple{N, Float64}) where {N} =
     map(i -> SiteInfo(i.position .+ shift, i.sublattice), sites)
-end
 
 function rotate_sample_in_plane(
     sites::AbstractVector{SiteInfo{N}};
@@ -232,9 +254,14 @@ function rotate_sample_in_plane(
     map(i -> SiteInfo(transformation(i.position), i.sublattice), sites)
 end
 
+"""
+    armchair_bilayer_hexagon(k::Integer; rotate::Real) -> Lattice{3}
 
+Construct AB-stacked bilayer hexagon sample with side length `k`. Second layer is rotated by
+`rotate` degrees.
+"""
 function armchair_bilayer_hexagon(
-    k::Int;
+    k::Integer;
     shift::NTuple{3, Float64} = graphene_Rs[3] .+ NTuple{3, Float64}((1, 0, 0)),
     rotate::Real = 0.0,
 )
@@ -244,7 +271,11 @@ function armchair_bilayer_hexagon(
     layer₂ = map(i -> SiteInfo(i.position, i.sublattice + 2), layer₁)
     layer₂ = shift_sample(layer₂, shift = shift)
     center_of_mass = (1 / length(layer₁)) .* reduce(.+, (i.position for i in layer₁))
-    layer₂ = rotate_sample_in_plane(layer₂; θ = rotate, origin = center_of_mass)
+    layer₂ = rotate_sample_in_plane(
+        layer₂;
+        θ = rotate,
+        origin = center_of_mass .+ graphene_δrs[2],
+    )
     [layer₁; layer₂]
 end
 
@@ -260,11 +291,11 @@ function _make_edges_plottable(sites, edges)
 end
 
 """
-    plot_lattice(sites::AbstractVector{<:SiteInfo}) -> Plot
+    plot_lattice(sites::Lattice; kwargs...) -> Plot
 
 Visualize a lattice. Different sublattices are shown in different color.
 """
-function plot_lattice(sites::AbstractVector{<:SiteInfo}; kwargs...)
+function plot_lattice(sites::Lattice; kwargs...)
     edges = nearest_neighbours(sites)
 
     function limits(axis::Int)
@@ -303,9 +334,9 @@ function plot_lattice(sites::AbstractVector{<:SiteInfo}; kwargs...)
     p
 end
 
-function plot_example_zigzag_samples(output::Union{AbstractString, Nothing} = nothing)
+function plot_example_zigzag_samples()
     plotone(k; kwargs...) = plot_lattice(zigzag_hexagon(k); kwargs...)
-    p = plot(
+    plot(
         plotone(1),
         plotone(2),
         plotone(3),
@@ -313,18 +344,14 @@ function plot_example_zigzag_samples(output::Union{AbstractString, Nothing} = no
         layout = grid(1, 4, widths = [0.1, 0.2, 0.3, 0.4]),
         size = (640, 260),
     )
-    if isnothing(output)
-        return p
-    else
-        savefig(p, output)
-        return nothing
-    end
 end
+plot_example_zigzag_samples(output::AbstractString) =
+    savefig(plot_example_zigzag_samples(), output)
 
-function plot_example_bilayer_samples(output::Union{AbstractString, Nothing} = nothing)
+function plot_example_bilayer_samples()
     plotone(k, θ; kwargs...) =
         plot_lattice(armchair_bilayer_hexagon(k, rotate = θ); markersize = 3.0, kwargs...)
-    p = plot(
+    plot(
         plotone(1, 0, title = raw"$\theta=0\degree$"),
         plotone(1, 10, title = raw"$\theta=10\degree$"),
         plotone(1, 20, title = raw"$\theta=20\degree$"),
@@ -337,13 +364,9 @@ function plot_example_bilayer_samples(output::Union{AbstractString, Nothing} = n
         size = (600, 200),
         dpi = 150,
     )
-    if isnothing(output)
-        return p
-    else
-        savefig(p, output)
-        return nothing
-    end
 end
+plot_example_bilayer_samples(output::AbstractString) =
+    savefig(plot_example_bilayer_samples(), output)
 
 function slater_koster_prb_86_125413(
     rᵢⱼ::NTuple{3, Float64};
@@ -378,23 +401,24 @@ function slater_koster_prb_86_125413(
 end
 
 
-function build_hamiltonian(
-    ::Type{ℝ},
-    sites::AbstractVector{<:SiteInfo},
-    t₁::Real,
-) where {ℝ <: Real}
+function nearest_neighbor_hamiltonian(sites::Lattice, t₁::Real)
     edges = nearest_neighbours(sites)
-    H = zeros(ℝ, length(sites), length(sites))
+    H = zeros(Float64, length(sites), length(sites))
     for (i, j) in edges
         H[i, j] = -t₁
         H[j, i] = -t₁
     end
     H
 end
-build_hamiltonian(sites::AbstractVector{<:SiteInfo}, t₁::Real) =
-    build_hamiltonian(Float64, sites, t₁)
 
+"""
+    density_of_states(eigenvalues::AbstractVector{<:Real}; σ::Real) -> Tuple{AbstractRange, Function}
+    density_of_states(hamiltonian::Hermitian; σ::Real) -> Tuple{AbstractRange, Function}
+    density_of_states(hamiltonian::AbstractMatrix; σ::Real) -> Tuple{AbstractRange, Function}
+    density_of_states(hamiltonian::AbstractString; dataset::AbstractString, σ::Real) -> Tuple{AbstractRange, Function}
 
+Calculate density of states.
+"""
 function density_of_states(eigenvalues::AbstractVector{<:Real}; σ::Real = 1e-1)
     # NOTE: We divide by the number of eigenvalues here to ensure proper normalization
     gaussian(x, μ) =
@@ -465,26 +489,37 @@ function single_layer_graphene_1626(
     nothing
 end
 
-function nearest_neighbor_distances(lattice, n::Integer; scale::Real = 2)
-    #!fmt: off
+"""
+    nearest_neighbor_distances(lattice::Lattice, n::Integer; scale::Real = 2) -> Vector{Float64}
+
+Get distances to the first `n` nearest neighbors.
+"""
+function nearest_neighbor_distances(lattice::Lattice, n::Integer; scale::Real = 2)
+    #! format: off
     lattice |>
-    v -> Iterators.drop(v, 1) |>
-    v -> Iterators.map(i -> norm(first(lattice).position .- i.position), v) |>
-    v -> Iterators.map(d -> round(d; digits=10), v) |>
-    v -> Iterators.filter(d -> d < scale * n, v) |>
-    collect |> sort |> unique |>
-    v -> Iterators.take(v, n) |>
-    collect
-    #!fmt: on
+        v -> Iterators.drop(v, 1) |>
+        v -> Iterators.map(i -> norm(first(lattice).position .- i.position), v) |>
+        v -> Iterators.map(d -> round(d; digits = 10), v) |>
+        v -> Iterators.filter(d -> d < scale * n, v) |>
+        collect |> sort |> unique |>
+        v -> Iterators.take(v, n) |>
+        collect
+    #! format: on
 end
 
-function graphene_hamiltonian_from_dft(lattice::AbstractVector{<:SiteInfo})
-    # Data provided by Malte Roesner
+"""
+    graphene_hamiltonian_from_dft(lattice::Lattice) -> Matrix
+
+Construct tight-binding Hamiltonian for monolayer graphene using hoppings obtained from ab
+initio calculations performed by Malte Roesner.
+"""
+function graphene_hamiltonian_from_dft(lattice::Lattice)
+    # Raw data from ab initio calculations
     ts = [
-        -2.433921,
-        -2.868647,
-        0.23901,
-        -0.263193,
+        -2.433921, # onsite
+        -2.868647, # nearest neighbor
+        0.23901, # next-nearest neighbor
+        -0.263193, # etc.
         0.023851,
         0.051767,
         -0.020566,
@@ -508,11 +543,21 @@ function graphene_hamiltonian_from_dft(lattice::AbstractVector{<:SiteInfo})
     H
 end
 
-function bilayer_graphene_hamiltonian_from_dft(lattice::AbstractVector{<:SiteInfo}; r₀::Real = graphene_Rs[3][3])
+"""
+    bilayer_graphene_hamiltonian_from_dft(lattice::Lattice) -> Matrix
+
+Construct tight-binding Hamiltonian for bilayer graphene using hoppings obtained from ab
+initio calculations performed by Malte Roesner. Interlayer hoppings are modelled using
+Slater-Koster parametrization from PRB 99, 205134.
+"""
+function bilayer_graphene_hamiltonian_from_dft(
+    lattice::Lattice;
+    r₀::Real = graphene_Rs[3][3],
+)
     tᵢₙₜᵣₐ = [
         -0.991157, # onsite
         -2.85655, # nearest neighbor
-        0.244362, # nest-nearest neighbor
+        0.244362, # next-nearest neighbor
         -0.25776, # etc.
         0.024267,
         0.051976,
@@ -520,7 +565,7 @@ function bilayer_graphene_hamiltonian_from_dft(lattice::AbstractVector{<:SiteInf
         -0.01445,
         -0.021728,
     ]
-    dᵢₙₜᵣₐ = nearest_neighbor_distances(filter(i->i.sublattice <= 2, lattice), 8)
+    dᵢₙₜᵣₐ = nearest_neighbor_distances(filter(i -> i.sublattice <= 2, lattice), 8)
 
     tᵢₙₜₑᵣ = [0.290394, 0.117477, 0.066704]
     dᵢₙₜₑᵣ = [r₀, sqrt(r₀^2 + 1), sqrt(r₀^2 + 1)]
@@ -533,7 +578,7 @@ function bilayer_graphene_hamiltonian_from_dft(lattice::AbstractVector{<:SiteInf
         H[j, j] = tᵢₙₜᵣₐ[1]
         for i in (j + 1):size(H, 1)
             r = norm(lattice[j].position .- lattice[i].position)
-            if isapprox(lattice[i].position[3] - lattice[j].position[3], 0; atol=1e-5)
+            if isapprox(lattice[i].position[3] - lattice[j].position[3], 0; atol = 1e-5)
                 index = findfirst(d -> d ≈ r, dᵢₙₜᵣₐ)
                 if !isnothing(index)
                     H[i, j] = tᵢₙₜᵣₐ[index + 1]
@@ -558,34 +603,6 @@ function bilayer_graphene_hamiltonian_from_dft(lattice::AbstractVector{<:SiteInf
 end
 
 
-function graphene_hamiltonian_from_dft(lattice::AbstractVector{<:SiteInfo})
-    # Automatically compute distances to the first n nearest neighbours
-    distances =
-        lattice |>
-        v -> Iterators.map(i -> norm(first(lattice).position .- i.position), v) |>
-        v -> Iterators.filter(d -> d < 10, v) |>
-        collect |>
-        sort |>
-        unique |>
-        v -> Iterators.take(v, 9) |>
-        collect
-    @info distances
-    tᵢₙₜᵣₐ = [
-        -2.433921,
-        -2.868647,
-        0.23901,
-        -0.263193,
-        0.023851,
-        0.051767,
-        -0.020566,
-        -0.015075,
-        -0.020681,
-    ]
-
-end
-
-
-
 function slater_koster_hamiltonian(lattice::AbstractVector{<:SiteInfo}, Δe::Real = 0)
     H = zeros(Float64, length(lattice), length(lattice))
     @inbounds for j in 1:size(H, 2)
@@ -607,61 +624,62 @@ function slater_koster_hamiltonian(lattice::AbstractVector{<:SiteInfo}, Δe::Rea
     end
     H
 end
-function bilayer_graphene_hamiltonian(k::Int, θ::Real = 0)
-    lattice = armchair_bilayer_hexagon(k, rotate = θ)
-    slater_koster_hamiltonian(lattice)
-end
-function bilayer_graphene(
-    k::Int,
-    output::AbstractString;
-    θ::Real = 0.0,
-    dataset::AbstractString = "/H",
-)
-    hamiltonian = bilayer_graphene_hamiltonian(k, θ)
-    folder = dirname(output)
-    if !isdir(folder)
-        mkpath(folder)
-    end
-    h5open(io -> io[dataset] = hamiltonian, output, "w")
-    nothing
-end
-bilayer_graphene_3252(output; kwargs...) = bilayer_graphene(10, output; kwargs...)
 
-function plot_bilayer_graphene_density_of_states(
-    output::Union{AbstractString, Nothing} = nothing,
-)
-    plotone(θ; kwargs...) = plot_density_of_states(
-        density_of_states(bilayer_graphene_hamiltonian(10, θ); σ = 0.15)...;
-        kwargs...,
-    )
-    p = plot(
-        plotone(0, xlabel = "", title = raw"$\theta = 0\degree$"),
-        plotone(10, xlabel = "", ylabel = "", title = raw"$\theta = 10\degree$"),
-        plotone(20, title = raw"$\theta = 20\degree$"),
-        plotone(30, ylabel = "", title = raw"$\theta = 30\degree$"),
-        layout = grid(2, 2),
-        size = (640, 480),
-    )
-    if isnothing(output)
-        return p
-    else
-        savefig(p, output)
-        return nothing
-    end
-end
+# function bilayer_graphene_hamiltonian(k::Int, θ::Real = 0)
+#     lattice = armchair_bilayer_hexagon(k, rotate = θ)
+#     slater_koster_hamiltonian(lattice)
+# end
+# function bilayer_graphene(
+#     k::Int,
+#     output::AbstractString;
+#     θ::Real = 0.0,
+#     dataset::AbstractString = "/H",
+# )
+#     hamiltonian = bilayer_graphene_hamiltonian(k, θ)
+#     folder = dirname(output)
+#     if !isdir(folder)
+#         mkpath(folder)
+#     end
+#     h5open(io -> io[dataset] = hamiltonian, output, "w")
+#     nothing
+# end
+# bilayer_graphene_3252(output; kwargs...) = bilayer_graphene(10, output; kwargs...)
 
-function single_layer_graphene_zigzag_1633(
-    output::AbstractString = nothing;
-    t₁::Real = 2.7,
-    dataset::AbstractString = "/H",
-)
-    lattice = zigzag_hexagon(16)
-    @assert length(lattice) == 1633
-    hamiltonian = build_hamiltonian(lattice, t₁)
-    folder = dirname(output)
-    if !isdir(folder)
-        mkpath(folder)
-    end
-    h5open(io -> io[dataset] = hamiltonian, output, "w")
-    nothing
-end
+# function plot_bilayer_graphene_density_of_states(
+#     output::Union{AbstractString, Nothing} = nothing,
+# )
+#     plotone(θ; kwargs...) = plot_density_of_states(
+#         density_of_states(bilayer_graphene_hamiltonian(10, θ); σ = 0.15)...;
+#         kwargs...,
+#     )
+#     p = plot(
+#         plotone(0, xlabel = "", title = raw"$\theta = 0\degree$"),
+#         plotone(10, xlabel = "", ylabel = "", title = raw"$\theta = 10\degree$"),
+#         plotone(20, title = raw"$\theta = 20\degree$"),
+#         plotone(30, ylabel = "", title = raw"$\theta = 30\degree$"),
+#         layout = grid(2, 2),
+#         size = (640, 480),
+#     )
+#     if isnothing(output)
+#         return p
+#     else
+#         savefig(p, output)
+#         return nothing
+#     end
+# end
+
+# function single_layer_graphene_zigzag_1633(
+#     output::AbstractString = nothing;
+#     t₁::Real = 2.7,
+#     dataset::AbstractString = "/H",
+# )
+#     lattice = zigzag_hexagon(16)
+#     @assert length(lattice) == 1633
+#     hamiltonian = build_hamiltonian(lattice, t₁)
+#     folder = dirname(output)
+#     if !isdir(folder)
+#         mkpath(folder)
+#     end
+#     h5open(io -> io[dataset] = hamiltonian, output, "w")
+#     nothing
+# end

@@ -88,36 +88,36 @@ end
 leading_eigenvalues(filename::AbstractString; kwargs...) =
     h5open(file -> leading_eigenvalues(file; kwargs...), filename, "r")
 
-function dispersion(
-    data,
-    lattice::AbstractVector{<:SiteInfo},
-    sublattices::Tuple{Int, Int};
-    δrs::AbstractVector{NTuple{3, Float64}},
-    direction::NTuple{3, Float64} = NTuple{3, Float64}((1, 0, 0)),
-    n::Int = 100,
-)
-    @assert n > 1
-    indices = choose_full_unit_cells(lattice; δrs = δrs)
-    left_indices = filter(i -> lattice[i].sublattice == sublattices[1], indices)
-    right_indices = filter(i -> lattice[i].sublattice == sublattices[2], indices)
-    lattice = lattice[left_indices]
-    qs = collect(0:(π / (n - 1)):π)
-    x = map(i -> i.position[1], lattice)
-    y = map(i -> i.position[2], lattice)
-    z = map(i -> i.position[3], lattice)
-    ωs = Float64[]
-    function transform(t)
-        push!(ωs, t[1])
-        t[2][left_indices, right_indices]
-    end
-    matrix = dispersion((transform(t) for t in data), map(q -> q .* direction, qs), x, y, z)
-    return permutedims(matrix), qs, ωs
-end
+# function dispersion(
+#     data,
+#     lattice::AbstractVector{<:SiteInfo},
+#     sublattices::Tuple{Int, Int};
+#     δrs::AbstractVector{NTuple{3, Float64}},
+#     direction::NTuple{3, Float64} = NTuple{3, Float64}((1, 0, 0)),
+#     n::Int = 100,
+# )
+#     @assert n > 1
+#     indices = choose_full_unit_cells(lattice; δrs = δrs)
+#     left_indices = filter(i -> lattice[i].sublattice == sublattices[1], indices)
+#     right_indices = filter(i -> lattice[i].sublattice == sublattices[2], indices)
+#     lattice = lattice[left_indices]
+#     qs = collect(0:(π / (n - 1)):π)
+#     x = map(i -> i.position[1], lattice)
+#     y = map(i -> i.position[2], lattice)
+#     z = map(i -> i.position[3], lattice)
+#     ωs = Float64[]
+#     function transform(t)
+#         push!(ωs, t[1])
+#         t[2][left_indices, right_indices]
+#     end
+#     matrix = dispersion((transform(t) for t in data), map(q -> q .* direction, qs), x, y, z)
+#     return permutedims(matrix), qs, ωs
+# end
 
 function dispersion(
     A::AbstractMatrix,
     qs::AbstractVector{NTuple{3, Float64}},
-    lattice::AbstractVector{<:SiteInfo},
+    lattice::Lattice{3},
     δrs::AbstractVector{NTuple{3, Float64}},
 )
     indices = choose_full_unit_cells(lattice; δrs = δrs)
@@ -134,11 +134,11 @@ function dispersion(
 end
 function dispersion(
     H::AbstractMatrix,
-    lattice::AbstractVector{<:SiteInfo};
+    lattice::Lattice{3};
     k₀::NTuple{3, Float64},
     k₁::NTuple{3, Float64},
     δrs::AbstractVector{NTuple{3, Float64}},
-    n::Int,
+    n::Integer,
 )
     @assert n > 1
     qs = map(q -> k₀ .+ (k₁ .- k₀) .* q, 0:(1 / (n - 1)):1)
@@ -153,7 +153,7 @@ end
 
 function band_structure(
     H::AbstractMatrix,
-    lattice::AbstractVector{<:SiteInfo};
+    lattice::Lattice;
     ks::AbstractVector{NTuple{3, Float64}},
     δrs::AbstractVector{NTuple{3, Float64}},
     n::Int = 100,
@@ -183,9 +183,10 @@ function graphene_high_symmetry_points(Gs = graphene_Gs)
     ticks = [raw"$\Gamma$", raw"$M$", raw"$K$", raw"$\Gamma$"]
     ks, ticks
 end
+
 function energy_at_dirac_point(
     H::AbstractMatrix,
-    lattice::AbstractVector{<:SiteInfo};
+    lattice::Lattice;
     Gs = graphene_Gs,
     δrs = graphene_δrs,
 )
@@ -194,114 +195,104 @@ function energy_at_dirac_point(
     sum(eigvals(Hermitian(Hk))) / size(Hk, 1)
 end
 
-function plot_graphene_band_structure(k::Int; n::Int = 50, kwargs...)
-    lattice = armchair_hexagon(k)
-    H₁ = build_hamiltonian(lattice, 2.7)
-    H₂ = slater_koster_hamiltonian(lattice)
-    H₂[diagind(H₂)] .-= energy_at_dirac_point(H₂, lattice)
-    H₃ = graphene_hamiltonian_from_dft(lattice)
-    H₃[diagind(H₃)] .-= energy_at_dirac_point(H₃, lattice)
+function plot_electronic_properties(
+    hamiltonians::AbstractVector{<:AbstractMatrix},
+    labels::AbstractVector{<:AbstractString},
+    lattice::Lattice{3};
+    δrs,
+    colors = [1, 2],
+    n::Integer = 50,
+    σ::Real = 0.12,
+)
+    for H in hamiltonians
+        H[diagind(H)] .-= energy_at_dirac_point(H, lattice)
+    end
 
-    ks, ticks = graphene_high_symmetry_points()
-    Ek₁, tick_locations = band_structure(H₁, lattice; ks = ks, δrs = graphene_δrs, n = n, kwargs...)
-    Ek₂, _ = band_structure(H₂, lattice; ks = ks, δrs = graphene_δrs, n = n, kwargs...)
-    Ek₃, _ = band_structure(H₃, lattice; ks = ks, δrs = graphene_δrs, n = n, kwargs...)
+    p₁ = plot()
+    for (i, H) in enumerate(hamiltonians)
+        ks, ticks = graphene_high_symmetry_points()
+        Ek, tick_locations = band_structure(H, lattice; ks = ks, δrs = graphene_δrs, n = n)
+        plot!(
+            p₁,
+            Ek[:, 1],
+            Ek[:, 2:end];
+            xticks = (tick_locations, ticks),
+            ylabel = raw"$E\,,\;\mathrm{eV}$",
+            label = [labels[i] "" "" ""],
+            color = [i i i i],
+            fontfamily = "computer modern",
+            legend = :top,
+            lw = 2,
+        )
+    end
+
+    p₂ = plot()
+    for (i, H) in enumerate(hamiltonians)
+        Es, dos = density_of_states(H, σ = σ)
+        plot!(
+            p₂,
+            Es,
+            dos.(Es);
+            xlabel = raw"$E\,,\;\mathrm{eV}$",
+            ylabel = raw"DoS",
+            color = i,
+            fontfamily = "computer modern",
+            lw = 2,
+            label = "",
+        )
+    end
+
     plot(
-        Ek₁[:, 1],
-        hcat(Ek₁[:, 2:end], Ek₂[:, 2:end], Ek₃[:, 2:end]);
-        xticks = (tick_locations, ticks),
-        ylabel = raw"$E\,,\;\mathrm{eV}$",
-        label = ["Nearest-neighbor" "" "Slater-Koster" "" "DFT" ""],
-        fontfamily = "computer modern",
-        legend = :top,
-        lw = 2,
-        color = [1 1 2 2 3 3],
-        kwargs...
+        p₁,
+        p₂,
+        layout = grid(1, 2),
+        left_margin = 3mm,
+        bottom_margin = 3mm,
+        size = (800, 300),
+        dpi = 150,
     )
 end
-function plot_graphene_density_of_states(k::Int; σ::Real = 0.12, kwargs...)
+
+function plot_graphene_electronic_properties(k::Integer; kwargs...)
     lattice = armchair_hexagon(k)
-    H₁ = build_hamiltonian(lattice, 2.7)
-    H₂ = slater_koster_hamiltonian(lattice)
-    H₂[diagind(H₂)] .-= energy_at_dirac_point(H₂, lattice)
-    H₃ = graphene_hamiltonian_from_dft(lattice)
-    H₃[diagind(H₃)] .-= energy_at_dirac_point(H₃, lattice)
-
-    Es₁, dos₁ = density_of_states(H₁, σ = σ)
-    Es₂, dos₂ = density_of_states(H₂, σ = σ)
-    Es₃, dos₃ = density_of_states(H₃, σ = σ)
-
-    p = plot(
-        Es₁,
-        dos₁.(Es₁);
-        xlabel = raw"$E\,,\;\mathrm{eV}$",
-        ylabel = raw"DoS",
-        fontfamily = "computer modern",
-        lw = 2,
-        label = "",
-        kwargs...
+    hamiltonians =
+        [nearest_neighbor_hamiltonian(lattice, 2.7), graphene_hamiltonian_from_dft(lattice)]
+    labels = ["Nearest-neighbor", "DFT"]
+    plot_electronic_properties(hamiltonians, labels, lattice; δrs = graphene_δrs, kwargs...)
+end
+function plot_bilayer_graphene_electronic_properties(k::Integer; θ::Real = 0, kwargs...)
+    lattice = armchair_bilayer_hexagon(k, rotate = θ)
+    hamiltonians =
+        [slater_koster_hamiltonian(lattice), bilayer_graphene_hamiltonian_from_dft(lattice)]
+    labels = ["Slater-Koster", "DFT"]
+    plot_electronic_properties(
+        hamiltonians,
+        labels,
+        lattice;
+        δrs = bilayer_graphene_δrs,
+        kwargs...,
     )
-    plot!(p,
-        Es₂,
-        dos₂.(Es₂);
-        xlabel = raw"$E\,,\;\mathrm{eV}$",
-        ylabel = raw"DoS",
-        fontfamily = "computer modern",
-        lw = 2,
-        label = "",
-    )
-    plot!(p,
-        Es₃,
-        dos₃.(Es₃);
-        xlabel = raw"$E\,,\;\mathrm{eV}$",
-        ylabel = raw"DoS",
-        fontfamily = "computer modern",
-        lw = 2,
-        label = "",
-    )
-    p
 end
 
-function plot_bilayer_graphene_electronic_structure(k::Int; n::Int = 50, σ::Real = 0.12)
-    lattice = armchair_bilayer_hexagon(k, rotate = 0)
-    H = slater_koster_hamiltonian(lattice)
-    H[diagind(H)] .-= energy_at_dirac_point(H, lattice, δrs = bilayer_graphene_δrs)
-    H₂ = bilayer_graphene_hamiltonian_from_dft(lattice)
-    H₂[diagind(H₂)] .-= energy_at_dirac_point(H₂, lattice, δrs = bilayer_graphene_δrs)
 
-    ks, ticks = graphene_high_symmetry_points()
-    Ek, tick_locations = band_structure(H, lattice; ks = ks, δrs = bilayer_graphene_δrs, n = n)
-    Ek₂, _ = band_structure(H₂, lattice; ks = ks, δrs = bilayer_graphene_δrs, n = n)
-    p₁ = plot(
-        Ek[:, 1],
-        hcat(Ek[:, 2:end], Ek₂[:, 2:end]);
-        xticks = (tick_locations, ticks),
-        ylabel = raw"$E\,,\;\mathrm{eV}$",
-        label = ["Slater-Koster" "" "" "" "DFT" "" "" ""],
-        fontfamily = "computer modern",
-        color = [1 1 1 1 2 2 2 2],
-        lw = 1,
-        legend = :top,
-    )
-
-    Es, dos = density_of_states(H, σ = σ)
-    Es₂, dos₂ = density_of_states(H₂, σ = σ)
-    p₂ = plot(
-        Es,
-        dos.(Es);
-        xlabel = raw"$E\,,\;\mathrm{eV}$",
-        ylabel = raw"DoS",
-        fontfamily = "computer modern",
-        lw = 1,
-        label = "",
-    )
-    plot!(p₂,
-        Es₂,
-        dos₂.(Es₂);
-        label = "",
-    )
-    plot(p₁, p₂, layout = grid(1, 2), left_margin=3mm, bottom_margin=3mm, size=(800, 300), dpi=150)
+function bilayer_graphene(
+    k::Int,
+    output::AbstractString;
+    θ::Real = 0.0,
+    dataset::AbstractString = "/H",
+)
+    lattice = armchair_bilayer_hexagon(k, rotate = θ)
+    hamiltonian = bilayer_graphene_hamiltonian_from_dft(lattice)
+    folder = dirname(output)
+    if !isdir(folder)
+        mkpath(folder)
+    end
+    h5open(io -> io[dataset] = hamiltonian, output, "w")
+    nothing
 end
+bilayer_graphene_3252(output; kwargs...) = bilayer_graphene(10, output; kwargs...)
+
+
 
 function padvalid(matrix::AbstractMatrix, n₁::Int, n₂::Int)
     out = similar(matrix, size(matrix) .+ 2 .* (n₁, n₂))
