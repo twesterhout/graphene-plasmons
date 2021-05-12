@@ -37,11 +37,15 @@ function transform_to_real_space(
             ref_U_r = permutedims(ref_U_r, (4, 3, 2, 1))
             ref_U_r = (ref_U_r .+ permutedims(ref_U_r, (1, 2, 4, 3))) ./ 2
         end
-        (R₁, R₂, _) = mapslices(R -> tuple(R...), read(io, "r_lattice"), dims = [1])
+        (R₁, R₂, R₃) = mapslices(R -> tuple(R...), read(io, "r_lattice"), dims = [1])
         rs = reshape(
             mapslices(r -> tuple(r...), read(io, "orbital_positions"), dims = [1]),
             :,
         )
+        for i in 1:length(rs)
+            r = rs[i]
+            rs[i] = @. R₁ * r[1] + R₂ * r[2] + R₃ * r[3]
+        end
         return U_q, R₁, R₂, rs, ref_U_r
     end
     _U_r = ifft(U_q, [1, 2])
@@ -59,7 +63,7 @@ function transform_to_real_space(
             δr = rs[b] .- rs[a]
             for j in 1:size(U_r, 2)
                 for i in 1:size(U_r, 1)
-                    δR[i, j, a, b] = norm(@. i * R₁ + j * R₂ + δr)
+                    δR[i, j, a, b] = norm(@. (i - 1) * R₁ + (j - 1) * R₂ + δr)
                 end
             end
         end
@@ -70,10 +74,9 @@ end
 function ohno_potential_fit(r, U)
     # e / 4πε₀ in eV⋅Å
     scale = 14.39964547842567
-    @. model(r, p) = scale * (p[1] / r + p[2] + p[3] / r^(3/2)) # scale * p[1] / r^p[2] + p[3]
-    mask = 0 .< r .< 25
-    @info U[mask][(end - 5):end]
-    fit = curve_fit(model, r[mask], U[mask], [1.87, 0.035, 0.3])
+    @. model(r, p) = scale * (p[1] / r + p[2] / r^3)
+    mask = 0.1 .< r .< 10
+    fit = curve_fit(model, r[mask], U[mask], [0.9, -1.0])
     @info "" fit.param
     return x -> model(x, fit.param)
 end
@@ -93,85 +96,52 @@ function _get_sub_U(a::Integer, b::Integer, δR, U_r)
 end
 
 function bilayer_graphene_coulomb_model(
-    filename::AbstractString = "data/03_BL_AB/H_25_K_18_B_128/03_cRPA/uqr.h5",
+    filename::AbstractString = "data/03_BL_AB/H_25_K_18_B_128_d_3.35/03_cRPA/uqr.h5",
 )
     U_r, δR, R₁, R₂, rs = transform_to_real_space(filename; sublattices = 4)
     _get_table(a, b) = sortslices(
         [reshape(view(δR, :, :, a, b), :) reshape(view(U_r, :, :, a, b), :)],
         dims = 1,
     )
-    tableᵃᵃ = _get_table(1, 1)
-    fitᵃᵃ = ohno_potential_fit(tableᵃᵃ[:, 1], tableᵃᵃ[:, 2])
-    tableᵃᵇ = _get_table(1, 2)
-    tableᵃᶜ = _get_table(1, 3)
-    tableᵃᵈ = _get_table(1, 4)
-    # rᵃᵃ, Uᵃᵃ = _get_sub_U(1, 1, δR, U_r)
-    # rᵃᵇ, Uᵃᵇ = _get_sub_U(1, 2, δR, U_r)
+    p = [plot(), plot(), plot(), plot()]
+    sublattices = ["A", "B", "A'", "B'"]
+    a = 1
+    for b in 1:4
+        table = _get_table(a, b)
+        fit = nothing
+        if b > 2
+            full_table = sortslices([_get_table(a, 3); _get_table(a, 4)], dims=1)
+            fit = ohno_potential_fit(full_table[:, 1], full_table[:, 2])
+        else
+            fit = ohno_potential_fit(table[:, 1], table[:, 2])
+        end
 
-    gᵃᵃ = plot(0.1:0.01:26, fitᵃᵃ.(0.1:0.01:26), lw = 3, label = raw"Fit")
-    scatter!(gᵃᵃ,
-        tableᵃᵃ[:, 1],
-        tableᵃᵃ[:, 2],
-        markersize = 4,
-        ylabel = raw"$U\,,\;\mathrm{eV}$",
-        xlabel = "",
-        label = "cRPA",
-        title = "A-A",
-    )
-    gᵃᵇ = scatter(
-        tableᵃᵇ[:, 1],
-        tableᵃᵇ[:, 2],
-        markersize = 4,
-        ylabel = "",
-        xlabel = "",
-        label = "cRPA",
-        title = "A-B",
-    )
-    gᵃᶜ = scatter(
-        tableᵃᶜ[:, 1],
-        tableᵃᶜ[:, 2],
-        markersize = 4,
-        ylabel = raw"$U\,,\;\mathrm{eV}$",
-        xlabel = raw"$r\,,\;\AA$",
-        label = "cRPA",
-        title = "A-A'",
-    )
-    gᵃᵈ = scatter(
-        tableᵃᵈ[:, 1],
-        tableᵃᵈ[:, 2],
-        markersize = 4,
-        ylabel = "",
-        xlabel = raw"$r\,,\;\AA$",
-        label = "cRPA",
-        title = "A-B'",
-    )
-    return plot(
-        gᵃᵃ,
-        gᵃᵇ,
-        gᵃᶜ,
-        gᵃᵈ,
+        rₘᵢₙ = first(table[:, 1]) - 0.3
+        if rₘᵢₙ < 0
+            rₘᵢₙ = 1.2
+        end
+        plot!(p[b], rₘᵢₙ:0.01:20, fit.(rₘᵢₙ:0.01:20), lw = 3, label = b > 1 ? "" : raw"Fit")
+        scatter!(p[b],
+            table[:, 1],
+            table[:, 2],
+            markersize = 4,
+            ylabel = b % 2 == 0 ? "" : raw"$U\,,\;\mathrm{eV}$",
+            xlabel = b <= 2 ? "" : raw"$r\,,\;\AA$",
+            label = b > 1 ? "" : "cRPA",
+            title = "$(sublattices[a])-$(sublattices[b])",
+        )
+    end
+    plot(
+        p...,
         layout = grid(2, 2),
         fontfamily = "computer modern",
         legend = :topright,
         size = (900, 700),
-        xlims = (0, 26),
+        xlims = (0, 20),
         ylims = (0, 10),
+        left_margin = 3mm,
+        bottom_margin = 1mm,
     )
-
-
-    # fit = ohno_potential_fit(rᵃᵃ, Uᵃᵃ)
-    g = plot(
-        ylabel = raw"$U\,,\;\mathrm{eV}$",
-        xlabel = raw"$r\,,\;\AA$",
-        fontfamily = "computer modern",
-        legend = :topright,
-        size = (640, 480),
-        xlims = (0, 26),
-    )
-    plot!(g, 2.4:0.01:26, fit.(2.4:0.01:26), lw = 3, label = raw"$C_1\cdot r^{-C_2} + C_3$")
-    scatter!(g, rᵃᵃ, Uᵃᵃ, markersize = 5, markerstrokewidth = 1.5, label = raw"A-A")
-    # scatter!(g, rᵃᵇ, Uᵃᵇ, markersize = 3, label = "A-B")
-    g
 end
 
 function analyze_in_real_space(U_r, δR, R₁, R₂, rs)
