@@ -71,12 +71,11 @@ function transform_to_real_space(
     return U_r, δR, R₁, R₂, rs
 end
 
-function ohno_potential_fit(r, U)
+function multipole_expansion_fit(r, U)
     # e / 4πε₀ in eV⋅Å
     scale = 14.39964547842567
     @. model(r, p) = scale * (p[1] / r + p[2] / r^3)
-    mask = 0.1 .< r .< 10
-    fit = curve_fit(model, r[mask], U[mask], [0.9, -1.0])
+    fit = curve_fit(model, r, U, [0.9, -1.0])
     @info "" fit.param
     return x -> model(x, fit.param)
 end
@@ -103,24 +102,49 @@ function bilayer_graphene_coulomb_model(
         [reshape(view(δR, :, :, a, b), :) reshape(view(U_r, :, :, a, b), :)],
         dims = 1,
     )
+
+    models = []
+    a = 1
+    for b in 1:3
+        table = _get_table(a, b > 2 ? (3:4) : b)
+        mask = 0 .< table[:, 1] .< 10
+        fit = multipole_expansion_fit(table[mask, 1], table[mask, 2])
+        if b == 1
+            @assert iszero(table[1, 1])
+            model = r-> abs(r) + 5e-1 < table[2, 1] ? table[1, 2] : fit(r)
+        else
+            model = r-> fit(r)
+        end
+        push!(models, model)
+    end
+
+    function coulomb(r, i, j)
+        if (i > 2 && j > 2) || (i <=2 && j <=2)
+            i == j ? models[1](r) : models[2](r)
+        else
+            models[3](r)
+        end
+    end
+    return coulomb
+end
+
+
+
+function plot_bilayer_graphene_coulomb_model(
+    filename::AbstractString = "data/03_BL_AB/H_25_K_18_B_128_d_3.35/03_cRPA/uqr.h5",
+)
+    U_r, δR, R₁, R₂, rs = transform_to_real_space(filename; sublattices = 4)
+    _get_table(a, b) = sortslices(
+        [reshape(view(δR, :, :, a, b), :) reshape(view(U_r, :, :, a, b), :)],
+        dims = 1,
+    )
     p = [plot(), plot(), plot(), plot()]
     sublattices = ["A", "B", "A'", "B'"]
+    coulomb = bilayer_graphene_coulomb_model(filename)
+
     a = 1
     for b in 1:4
         table = _get_table(a, b)
-        fit = nothing
-        if b > 2
-            full_table = sortslices([_get_table(a, 3); _get_table(a, 4)], dims=1)
-            fit = ohno_potential_fit(full_table[:, 1], full_table[:, 2])
-        else
-            fit = ohno_potential_fit(table[:, 1], table[:, 2])
-        end
-
-        rₘᵢₙ = first(table[:, 1]) - 0.3
-        if rₘᵢₙ < 0
-            rₘᵢₙ = 1.2
-        end
-        plot!(p[b], rₘᵢₙ:0.01:20, fit.(rₘᵢₙ:0.01:20), lw = 3, label = b > 1 ? "" : raw"Fit")
         scatter!(p[b],
             table[:, 1],
             table[:, 2],
@@ -130,6 +154,8 @@ function bilayer_graphene_coulomb_model(
             label = b > 1 ? "" : "cRPA",
             title = "$(sublattices[a])-$(sublattices[b])",
         )
+        rs = 0.1:0.01:20
+        plot!(p[b], rs, coulomb.(rs, a, b), lw = 3, label = b > 1 ? "" : raw"Fit")
     end
     plot(
         p...,
@@ -177,7 +203,7 @@ function visualize_in_real_space(U_r, δR, R₁, R₂, rs)
     g
 end
 
-function main()
-    p = visualize_in_real_space(transform_to_real_space("data/cRPA/uq.h5")...)
-    savefig(p, "coulomb_interaction_from_cRPA.png")
-end
+# function main()
+#     p = visualize_in_real_space(transform_to_real_space("data/cRPA/uq.h5")...)
+#     savefig(p, "coulomb_interaction_from_cRPA.png")
+# end
