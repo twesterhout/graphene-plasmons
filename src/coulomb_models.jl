@@ -128,6 +128,22 @@ function bilayer_graphene_coulomb_model(
     return coulomb
 end
 
+function make_coulomb_matrix(lattice::Lattice, model::Function)
+    V = Matrix{Float64}(undef, length(lattice), length(lattice))
+    for j in 1:size(V, 2)
+        V[j, j] = model(0, lattice[j].sublattice, lattice[j].sublattice)
+        for i in 1:(j - 1)
+            V[i, j] = model(1.424919 * norm(lattice[i].position .- lattice[j].position),
+                            lattice[i].sublattice, lattice[j].sublattice)
+            if V[i, j] > 9.27
+                @info "" i j lattice[i].sublattice lattice[j].sublattice norm(lattice[i].position .- lattice[j].position)
+                @assert i == j
+            end
+            V[j, i] = V[i, j]
+        end
+    end
+    V
+end
 
 
 function plot_bilayer_graphene_coulomb_model(
