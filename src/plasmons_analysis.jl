@@ -6,6 +6,7 @@ using LinearAlgebra
 using DSP
 using HDF5
 using Plots
+using ColorSchemes
 
 
 function all_matrices(filenames::AbstractVector{<:AbstractString}; group_name = "/χ")
@@ -160,12 +161,13 @@ function band_structure(
 )
     parts = []
     ticks = []
-    scale = minimum((norm(ks[i + 1] .- ks[i]) for i in 1:length(ks) - 1))
+    scale = minimum((norm(ks[i + 1] .- ks[i]) for i in 1:(length(ks) - 1)))
     offset = 0
     for i in 1:(length(ks) - 1)
         number_points = round(Int, norm(ks[i + 1] .- ks[i]) / scale * n)
         xs = (offset + 1):(offset + number_points)
-        ys = dispersion(H, lattice; k₀ = ks[i], k₁ = ks[i + 1], δrs = δrs, n = number_points)
+        ys =
+            dispersion(H, lattice; k₀ = ks[i], k₁ = ks[i + 1], δrs = δrs, n = number_points)
         if i != length(ks) - 1
             number_points -= 1
         end
@@ -304,6 +306,14 @@ function padvalid(matrix::AbstractMatrix, n₁::Int, n₂::Int)
     out[(d₁ + n₁ + 1):(d₁ + 2 * n₂), :] .= view(out, (d₁ + n₁):(d₁ + n₁), :)
     out
 end
+function padvalid(vector::AbstractVector, n::Int)
+    d = length(vector)
+    out = similar(vector, d + 2 * n)
+    out[(n + 1):(d + n)] .= vector
+    out[1:n] .= vector[1]
+    out[(d + n + 1):(d + 2 * n)] .= vector[d]
+    out
+end
 function smoothen(matrix::AbstractMatrix, kernel::AbstractMatrix)
     @assert all(k -> mod(k, 2) == 1, size(kernel))
     k = size(kernel)
@@ -312,6 +322,13 @@ function smoothen(matrix::AbstractMatrix, kernel::AbstractMatrix)
         k[2]:(end - (k[2] - 1)),
     ]
     @assert size(out) == size(matrix)
+    out
+end
+function smoothen(vector::AbstractVector, kernel::AbstractVector)
+    @assert mod(length(kernel), 2) == 1
+    k = length(kernel)
+    out = conv(padvalid(vector, div(k, 2)), kernel)[k:(end - (k - 1))]
+    @assert size(out) == size(vector)
     out
 end
 function smoothen(xs::AbstractMatrix; σ::Real = 3)
@@ -329,6 +346,19 @@ function smoothen(xs::AbstractMatrix; σ::Real = 3)
         for x in 1:k₁
             kernel[x, y] = exp(-norm((x, y) .- μ)^2 / σ)
         end
+    end
+    kernel ./= sum(kernel)
+    smoothen(xs, kernel)
+end
+function smoothen(xs::AbstractVector; σ::Real = 3)
+    k = min(round(6 * σ, RoundUp), length(xs) - 1)
+    if mod(k, 2) == 0
+        k += 1
+    end
+    μ = div(k + 1, 2)
+    kernel = similar(xs, eltype(xs), k)
+    for x in 1:k
+        kernel[x] = exp(-(x - μ)^2 / σ)
     end
     kernel ./= sum(kernel)
     smoothen(xs, kernel)
@@ -406,4 +436,123 @@ function single_layer_graphene_1626_polarizability_dispersion(
         io["χᵃᵇ"] = χs[2]
     end
     nothing
+end
+
+function plot_eigenvector(lattice::Lattice{3}, vector::AbstractVector; kwargs...)
+    x = map(i -> i.position[1], lattice)
+    y = map(i -> i.position[2], lattice)
+    z = real.(vector)
+    scatter(
+        x,
+        y,
+        marker_z = z,
+        aspect_ratio = 1,
+        markersize = 5,
+        markerstrokewidth = 0,
+        seriescolor = :balance,
+        label = "",
+        showaxis = false,
+        ticks = false,
+        size = (480, 480),
+        dpi = 150;
+        kwargs...,
+    )
+end
+function plot_eigenvector_bilayer(
+    lattice::Lattice{3},
+    vector::AbstractVector;
+    ω::Real,
+    kwargs...,
+)
+    mask = [lattice[i].position[3] ≈ 0 for i in 1:length(lattice)]
+    zₘₐₓ = maximum(abs.(extrema((real(z) for z in vector))))
+    p₁ = plot_eigenvector(
+        lattice[mask],
+        vector[mask];
+        title = raw"$\omega = " * string(round(ω; digits = 4)) * raw"\,,\;\mathrm{eV}$",
+        colorbar = false,
+        clims = (-zₘₐₓ, zₘₐₓ),
+    )
+    p₂ = plot_eigenvector(
+        lattice[.!mask],
+        vector[.!mask];
+        colorbar = true,
+        clims = (-zₘₐₓ, zₘₐₓ),
+    )
+    plot(
+        p₁,
+        p₂,
+        layout = grid(1, 2, widths = [0.45, 0.55]),
+        fontfamily = "computer modern",
+        size = (960, 480),
+    )
+end
+function plot_eigenvector_bilayer(
+    lattice::Lattice{3},
+    filename::AbstractString;
+    output::AbstractString,
+)
+    frequencies, eigenvectors, densities = h5open(filename, "r") do io
+        read(io, "frequencies"), read(io, "eigenvectors"), read(io, "densities")
+    end
+    for (i, ω) in enumerate(frequencies)
+        @info "ω = $ω..."
+        savefig(
+            plot_eigenvector_bilayer(lattice, eigenvectors[:, i]; ω = ω),
+            "$output/eigenvector_" * string(round(Int, 1000 * ω), pad = 5) * ".png",
+        )
+        savefig(
+            plot_eigenvector_bilayer(lattice, densities[:, i]; ω = ω),
+            "$output/density_" * string(round(Int, 1000 * ω), pad = 5) * ".png",
+        )
+    end
+    nothing
+end
+function plot_eels(filename::AbstractString; σ::Real = 10, kwargs...)
+    frequencies, eigenvalues = h5open(filename, "r") do io
+        read(io, "frequencies"), read(io, "eigenvalues")
+    end
+    loss = @. -imag(1 / eigenvalues)
+    # p = plot(
+    #     frequencies,
+    #     loss
+    # )
+    plot(
+        frequencies,
+        smoothen(reshape(loss, :, 1); σ = σ),
+        xlims = (0, 20),
+        width = 3,
+        xlabel = raw"$\omega\,,\;\mathrm{eV}$",
+        ylabel = raw"$-\mathrm{Im}[1/\varepsilon_1]$",
+        fontfamily = "computer modern";
+        kwargs...
+    )
+    # p
+end
+function plot_eels(; σ::Real = 20, kwargs...)
+    filenames = [
+        "data/bilayer/loss_3252_θ=0.h5",
+        "data/bilayer/loss_3252_θ=10.h5",
+        "data/bilayer/loss_3252_θ=20.h5",
+        "data/bilayer/loss_3252_θ=30.h5"
+    ]
+    labels = [raw"$\theta = 0\degree$" raw"$\theta = 10\degree$" raw"$\theta = 20\degree$" raw"$\theta = 30\degree$"]
+    frequencies = h5open(io->read(io, "frequencies"), first(filenames), "r")
+    eigenvalues = hcat([h5open(io->read(io, "eigenvalues"), f, "r") for f in filenames]...)
+    loss = @. -imag(1 / eigenvalues)
+    loss = hcat([smoothen(loss[:, i]; σ = σ) for i in 1:size(loss, 2)]...)
+    plot(
+        frequencies,
+        hcat(loss, 10 .* real.(eigenvalues[:, 1])),
+        xlims = (0, 2),
+        width = 1,
+        labels = labels,
+        xlabel = raw"$\omega\,,\;\mathrm{eV}$",
+        ylabel = raw"$-\mathrm{Im}[1/\varepsilon_1]$",
+        size = (640, 480),
+        dpi = 150,
+        fontfamily = "computer modern";
+        kwargs...
+    )
+    # p
 end
