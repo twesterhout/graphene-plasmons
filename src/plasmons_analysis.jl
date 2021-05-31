@@ -7,6 +7,7 @@ using DSP
 using HDF5
 using Plots
 using ColorSchemes
+using Dates
 
 
 function all_matrices(filenames::AbstractVector{<:AbstractString}; group_name = "/χ")
@@ -57,6 +58,58 @@ function combine_outputs(
 end
 combine_outputs(pattern::AbstractString, output::AbstractString) =
     combine_outputs(glob(basename(pattern), dirname(pattern)), output)
+
+function _dielectric(χ::AbstractMatrix{Complex{ℝ}}, V::AbstractMatrix{ℝ}) where {ℝ <: Real}
+    # ℂ = complex(ℝ)
+    if size(χ, 1) != size(χ, 2) || size(χ) != size(V)
+        throw(DimensionMismatch(
+            "dimensions of χ and V do not match: $(size(χ)) != $(size(V)); " *
+            "expected two square matrices of the same size",
+        ))
+    end
+    A = V * real(χ)
+    @inbounds A[diagind(A)] .-= one(ℝ)
+    B = V * imag(χ)
+    return @. -(A + 1im * B)
+end
+
+function compute_leading_eigenvalues(filename::AbstractString, V::AbstractMatrix; output::AbstractString)
+    h5open(filename, "r") do io
+        group = io["/χ"]
+        ωs = similar(V, length(group))
+        eigenvalues = similar(V, complex(eltype(V)), length(group))
+        eigenvectors = similar(V, complex(eltype(V)), size(V, 1), length(group))
+        densities = similar(V, complex(eltype(V)), size(V, 1), length(group))
+        for (i, d) in enumerate(io["/χ"])
+            ωs[i] = real(read(attributes(d), "ħω"))
+            @info "Handling ω = $(ωs[i])..."
+            χ = read(d)
+            @info "Computing ε..."
+            # t₀ = time_ns()
+            ε = _dielectric(χ, V)
+            # @assert ε ≈ dielectric(χ, V)
+            # t₁ = time_ns()
+            # @info "Done in $((t₁ - t₀) / 1e9)..."
+            @info "Computing eigen decomposition of ε..."
+            t₀ = time_ns()
+            f = eigen!(ε)
+            t₁ = time_ns()
+            @info "Done in $((t₁ - t₀) / 1e9)..."
+            @info "Computing loss..."
+            index = argmax(map(z->-imag(1/z), f.values))
+            eigenvalues[i] = f.values[index]
+            eigenvectors[:, i] .= view(f.vectors, :, index)
+            densities[:, i] .= χ * view(f.vectors, :, index)
+        end
+        h5open(output, "w") do outfile
+            outfile["frequencies"] = ωs
+            outfile["eigenvalues"] = eigenvalues
+            outfile["eigenvectors"] = eigenvectors
+            outfile["densities"] = densities
+        end
+    end
+    nothing
+end
 
 
 function loss_function(ϵ::AbstractVector{<:Complex}; count::Integer = 1)
