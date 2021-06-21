@@ -79,12 +79,13 @@ function image_charge_model(ρ, d, ε₁, ε₂, ε₃, δ::Real; maxiter::Integ
     return scale / ε₁ * (t₀ + 2 * t₁ + (L₁₂ + L₁₃) * t₂)
 end
 function image_charge_model_fit(r, U; maxiter::Integer = 20, ε₂::Real = 1, ε₃::Real = 1)
-    @. model(r, p) = image_charge_model(r, p[1], p[2], ε₂, ε₃, p[3]; maxiter = maxiter)
+    d = 6.7
+    @. model(r, p) = image_charge_model(r, d, p[2], ε₂, ε₃, p[3]; maxiter = maxiter)
     fit = curve_fit(
         model,
         r,
         U,
-        [6.7, 2.2, 0.78],
+        [d, 2.2, 0.78],
         lower = [1.0, 1.0, 0.01],
         upper = [10.0, 10.0, 2.0],
     )
