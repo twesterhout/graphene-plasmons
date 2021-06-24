@@ -98,7 +98,7 @@ end
 Create a constraint which can be used to filter sites belonging to an armchair hexagon with
 side length `k`.
 """
-function armchain_hexagon_constraints(k::Int)
+function armchain_hexagon_constraints(k::Integer)
     @assert k >= 1
     L = 3 * k - 2 # Side length of our hexagon
     ε = 5 / 1000 # To avoid issues with float comparisons
@@ -122,7 +122,7 @@ end
 Create a constraint which can be used to filter sites belonging to a hexagon with
 zigzag edges of side length `k`.
 """
-function zigzag_hexagon_constraints(k::Int)
+function zigzag_hexagon_constraints(k::Integer)
     @assert k >= 1
     ε = 5 / 1000 # To avoid issues with float comparisons
     line(a, b) = i -> i.position[2] - (a * i.position[1] + b)
@@ -136,10 +136,11 @@ function zigzag_hexagon_constraints(k::Int)
 end
 
 """
-    choose_full_unit_cells(sites::Lattice; δrs) -> Lattice
+    choose_full_unit_cells(sites::Lattice; δrs) -> Vector{Int}
 
 Given a lattice choose only those sites which constitute full unit cells. `δrs` specifies
-positions of atoms within one unit cell.
+positions of atoms within one unit cell. Indices of sites belonging to the new lattice are
+returned.
 """
 function choose_full_unit_cells(
     sites::Lattice{N};
@@ -295,7 +296,7 @@ end
 
 Visualize a lattice. Different sublattices are shown in different color.
 """
-function plot_lattice(sites::Lattice; kwargs...)
+function plot_lattice(sites::Lattice; sublattices::Bool = true, kwargs...)
     edges = nearest_neighbours(sites)
 
     function limits(axis::Int)
@@ -316,8 +317,8 @@ function plot_lattice(sites::Lattice; kwargs...)
     )
 
     (aₘᵢₙ, aₘₐₓ) = extrema((i.sublattice for i in sites))
-    colors = [2 3 2 3]
-    alpha = [1.0 1.0 0.6 0.6]
+    colors = sublattices ? [2 3 2 3] : [2 2 3 3]
+    alpha = [1.0 1.0 0.7 0.7]
     for a in aₘₐₓ:-1:aₘᵢₙ
         sublattice = filter(i -> i.sublattice == a, sites)
         scatter!(
@@ -336,21 +337,38 @@ end
 
 function plot_example_zigzag_samples()
     plotone(k; kwargs...) = plot_lattice(zigzag_hexagon(k); kwargs...)
+    sizes = [1, 2, 3, 4]
+    widths = [1 + 2 * (2 * n) - 0.5 * (2 * n - 1) for n in sizes]
+    scale = (1 + sqrt(3) * (2 * maximum(sizes))) / sum(widths)
     plot(
-        plotone(1),
-        plotone(2),
-        plotone(3),
-        plotone(4),
-        layout = grid(1, 4, widths = [0.1, 0.2, 0.3, 0.4]),
-        size = (640, 260),
+        (plotone(n) for n in sizes)...,
+        layout = grid(1, 4, widths = widths ./ sum(widths)),
+        size = (800, scale * 800),
+        dpi = 150
     )
 end
 plot_example_zigzag_samples(output::AbstractString) =
     savefig(plot_example_zigzag_samples(), output)
 
+function plot_example_armchair_samples()
+    plotone(k; kwargs...) = plot_lattice(armchair_hexagon(k); kwargs...)
+    sizes = [1, 2, 3, 4]
+    widths = [1 + 2 * (2 * n - 1) + (2 * n - 2) for n in sizes]
+    scale = sqrt(3) / 2 * maximum(widths) / sum(widths)
+    plot(
+        (plotone(n) for n in sizes)...,
+        layout = grid(1, 4, widths = widths ./ sum(widths)),
+        size = (800, scale * 800),
+        dpi = 150
+    )
+end
+plot_example_armchair_samples(output::AbstractString) =
+    savefig(plot_example_armchair_samples(), output)
+
 function plot_example_bilayer_samples()
     plotone(k, θ; kwargs...) =
-        plot_lattice(armchair_bilayer_hexagon(k, rotate = θ); markersize = 3.0, kwargs...)
+        plot_lattice(armchair_bilayer_hexagon(k, rotate = θ); sublattices = false, markersize = 3.0, kwargs...)
+    heights = [1, 4]
     plot(
         plotone(1, 0, title = raw"$\theta=0\degree$"),
         plotone(1, 10, title = raw"$\theta=10\degree$"),
@@ -360,13 +378,25 @@ function plot_example_bilayer_samples()
         plotone(2, 10),
         plotone(2, 20),
         plotone(2, 30),
-        layout = grid(2, 4, heights = [0.30, 0.7]),
-        size = (600, 200),
+        layout = grid(2, 4, heights = heights ./ sum(heights)),
+        size = (800, 300),
         dpi = 150,
     )
 end
 plot_example_bilayer_samples(output::AbstractString) =
     savefig(plot_example_bilayer_samples(), output)
+
+function plot_our_sample()
+    plotone(k, θ; kwargs...) = plot_lattice(
+        armchair_bilayer_hexagon(k, rotate = θ);
+        sublattices = false,
+        markersize = 3.0,
+        markerstrokewidth = 0.2,
+        kwargs...,
+    )
+    plot(plotone(10, 10, title = raw"$\theta=10\degree$"), size = (800, 700), dpi = 150)
+end
+plot_our_sample(output::AbstractString) = savefig(plot_our_sample(), output)
 
 function slater_koster_prb_86_125413(
     rᵢⱼ::NTuple{3, Float64};
