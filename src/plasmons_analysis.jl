@@ -519,25 +519,29 @@ function plot_eigenvector_bilayer(
 )
     mask = [lattice[i].position[3] ≈ 0 for i in 1:length(lattice)]
     zₘₐₓ = maximum(abs.(extrema((real(z) for z in vector))))
+    xlims = (-1, +1) .+ extrema((i.position[1] for i in lattice))
+    ylims = (-1, +1) .+ extrema((i.position[2] for i in lattice))
     p₁ = plot_eigenvector(
         lattice[mask],
         vector[mask];
         title = raw"$\omega = " * string(round(ω; digits = 4)) * raw"\,,\;\mathrm{eV}$",
         colorbar = false,
-        clims = (-zₘₐₓ, zₘₐₓ),
     )
     p₂ = plot_eigenvector(
         lattice[.!mask],
         vector[.!mask];
         colorbar = true,
-        clims = (-zₘₐₓ, zₘₐₓ),
     )
     plot(
         p₁,
         p₂,
+        xlims = xlims,
+        ylims = ylims,
+        clims = (-zₘₐₓ, zₘₐₓ),
         layout = grid(1, 2, widths = [0.45, 0.55]),
         fontfamily = "computer modern",
         size = (960, 480),
+        right_margin = 2mm,
     )
 end
 function plot_eigenvector_bilayer(
@@ -559,6 +563,25 @@ function plot_eigenvector_bilayer(
             "$output/density_" * string(round(Int, 10000 * ω), pad = 6) * ".png",
         )
     end
+    nothing
+end
+function plot_test_bilayer(
+    lattice::Lattice{3},
+    filename::AbstractString;
+    ω::Real,
+    output::AbstractString,
+)
+    Π₀, V₀ = h5open(filename, "r") do io
+        read(io, "Π₀"), read(io, "V₀")
+    end
+    savefig(
+        plot_eigenvector_bilayer(lattice, Π₀; ω = ω),
+        "$output/Pi0_" * string(round(Int, 10000 * ω), pad = 6) * ".png",
+    )
+    savefig(
+        plot_eigenvector_bilayer(lattice, V₀; ω = ω),
+        "$output/V0_" * string(round(Int, 10000 * ω), pad = 6) * ".png",
+    )
     nothing
 end
 function plot_eels(filename::AbstractString; σ::Real = 10, kwargs...)
