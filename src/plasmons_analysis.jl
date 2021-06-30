@@ -175,6 +175,27 @@ function compute_V₀_and_Π₀(; output::AbstractString)
     nothing
 end
 
+function compute_W(ε::AbstractMatrix, V::AbstractMatrix)
+    inverse_ε = inv(ε)
+    return real(inverse_ε) * V .+ 1im .* (imag(inverse_ε) * V)
+end
+function compute_bilayer_screened_coulomb_interaction(θ::Real; output::AbstractString)
+    prefix = "/vol/tcmscratch04/twesterhout/graphene-plasmons/data/bilayer"
+    filename = "$prefix/output_3252_θ=$(θ)_0.0.h5"
+    lattice = armchair_bilayer_hexagon(10; rotate = θ)
+    V = bilayer_graphene_coulomb_model(lattice)
+    χ = h5open(filename, "r") do io
+        d = io["/χ/0001"]
+        @assert real(read(attributes(d), "ħω")) ≈ 0.0
+        read(d)
+    end
+    ε = _dielectric(χ, V)
+    W = compute_W(ε, V)
+    h5open(output, "w") do io
+        io["W"] = W
+    end
+    nothing
+end
 
 function loss_function(ϵ::AbstractVector{<:Complex}; count::Integer = 1)
     loss = sort!(@. imag(1 / ϵ))
