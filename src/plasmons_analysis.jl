@@ -111,6 +111,70 @@ function compute_leading_eigenvalues(filename::AbstractString, V::AbstractMatrix
     nothing
 end
 
+function compute_V₀_and_Π₀(χ::AbstractMatrix, V::AbstractMatrix)
+    @info "Computing ε..."
+    ε = _dielectric(χ, V)
+    @info "Computing eigen decomposition of ε..."
+    t₀ = time_ns()
+    f = eigen!(ε)
+    t₁ = time_ns()
+    @info "Done in $((t₁ - t₀) / 1e9)..."
+    @info "Computing loss..."
+    index = argmax(map(z->-imag(1/z), f.values))
+    v₀ = f.vectors[:, index]
+    Π₀ = χ * v₀
+    V₀ = conj(V * v₀)
+    return Π₀, V₀
+end
+# function compute_V₀_and_Π₀(ħω::Real, θ::Real; output::AbstractString)
+#     V = bilayer_graphene_coulomb_model(armchair_bilayer_hexagon(10; rotate = θ))
+#     χ = nothing
+#     filename = "/vol/tcmscratch04/twesterhout/graphene-plasmons/data/bilayer/output_3252_θ=$(θ)_0.0_1.0.h5"
+#     # filename = "/vol/tcmscratch04/twesterhout/graphene-plasmons/data/bilayer/output_3252_θ=$(θ)_0.84_0.88.h5"
+#     h5open(filename, "r") do io
+#         group = io["/χ"]
+#         for (i, d) in enumerate(io["/χ"])
+#             @info "" i real(read(attributes(d), "ħω"))
+#             if ħω ≈ real(read(attributes(d), "ħω"))
+#                 χ = read(d)
+#                 break
+#             end
+#         end
+#     end
+#     Π₀, V₀ = compute_V₀_and_Π₀(χ, V)
+#     h5open(output, "w") do io
+#         io["Π₀"] = Π₀
+#         io["V₀"] = V₀
+#     end
+#     nothing
+# end
+function compute_V₀_and_Π₀(; output::AbstractString)
+    prefix = "/vol/tcmscratch04/twesterhout/graphene-plasmons/data/bilayer"
+    table = [
+         (0, 0.9775, "$prefix/output_3252_θ=0_0.0_1.0.h5"),
+         (0, 1.65, "$prefix/output_3252_θ=0_1.63_1.67.h5"),
+         (30, 1.695, "$prefix/output_3252_θ=30_1.0_2.0.h5"),
+         (30, 0.8566, "$prefix/output_3252_θ=30_0.84_0.88.h5"),
+    ]
+    for (θ, ħω, filename) in table
+        lattice = armchair_bilayer_hexagon(10; rotate = θ)
+        V = bilayer_graphene_coulomb_model(lattice)
+        χ = nothing
+        h5open(filename, "r") do io
+            for (i, d) in enumerate(io["/χ"])
+                if ħω ≈ real(read(attributes(d), "ħω"))
+                    χ = read(d)
+                    break
+                end
+            end
+        end
+        Π₀, V₀ = compute_V₀_and_Π₀(χ, V)
+        savefig(plot_eigenvector_bilayer(lattice, Π₀; ω = ħω), "$output/Π₀_θ=$(θ)_ω=$(ħω).png")
+        savefig(plot_eigenvector_bilayer(lattice, V₀; ω = ħω), "$output/V₀_θ=$(θ)_ω=$(ħω).png")
+    end
+    nothing
+end
+
 
 function loss_function(ϵ::AbstractVector{<:Complex}; count::Integer = 1)
     loss = sort!(@. imag(1 / ϵ))
