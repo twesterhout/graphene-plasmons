@@ -7,7 +7,7 @@ using DSP
 using HDF5
 using Plots
 using ColorSchemes
-using Dates
+# using Dates
 
 
 function all_matrices(filenames::AbstractVector{<:AbstractString}; group_name = "/χ")
@@ -583,25 +583,29 @@ function plot_eigenvector_bilayer(
 )
     mask = [lattice[i].position[3] ≈ 0 for i in 1:length(lattice)]
     zₘₐₓ = maximum(abs.(extrema((real(z) for z in vector))))
+    xlims = (-1, +1) .+ extrema((i.position[1] for i in lattice))
+    ylims = (-1, +1) .+ extrema((i.position[2] for i in lattice))
     p₁ = plot_eigenvector(
         lattice[mask],
         vector[mask];
         title = raw"$\omega = " * string(round(ω; digits = 4)) * raw"\,,\;\mathrm{eV}$",
         colorbar = false,
-        clims = (-zₘₐₓ, zₘₐₓ),
     )
     p₂ = plot_eigenvector(
         lattice[.!mask],
         vector[.!mask];
         colorbar = true,
-        clims = (-zₘₐₓ, zₘₐₓ),
     )
     plot(
         p₁,
         p₂,
+        xlims = xlims,
+        ylims = ylims,
+        clims = (-zₘₐₓ, zₘₐₓ),
         layout = grid(1, 2, widths = [0.45, 0.55]),
         fontfamily = "computer modern",
         size = (960, 480),
+        right_margin = 2mm,
     )
 end
 function plot_eigenvector_bilayer(
@@ -616,13 +620,32 @@ function plot_eigenvector_bilayer(
         @info "ω = $ω..."
         savefig(
             plot_eigenvector_bilayer(lattice, eigenvectors[:, i]; ω = ω),
-            "$output/eigenvector_" * string(round(Int, 1000 * ω), pad = 5) * ".png",
+            "$output/eigenvector_" * string(round(Int, 10000 * ω), pad = 6) * ".png",
         )
         savefig(
             plot_eigenvector_bilayer(lattice, densities[:, i]; ω = ω),
-            "$output/density_" * string(round(Int, 1000 * ω), pad = 5) * ".png",
+            "$output/density_" * string(round(Int, 10000 * ω), pad = 6) * ".png",
         )
     end
+    nothing
+end
+function plot_test_bilayer(
+    lattice::Lattice{3},
+    filename::AbstractString;
+    ω::Real,
+    output::AbstractString,
+)
+    Π₀, V₀ = h5open(filename, "r") do io
+        read(io, "Π₀"), read(io, "V₀")
+    end
+    savefig(
+        plot_eigenvector_bilayer(lattice, Π₀; ω = ω),
+        "$output/Pi0_" * string(round(Int, 10000 * ω), pad = 6) * ".png",
+    )
+    savefig(
+        plot_eigenvector_bilayer(lattice, V₀; ω = ω),
+        "$output/V0_" * string(round(Int, 10000 * ω), pad = 6) * ".png",
+    )
     nothing
 end
 function plot_eels(filename::AbstractString; σ::Real = 10, kwargs...)
@@ -646,23 +669,136 @@ function plot_eels(filename::AbstractString; σ::Real = 10, kwargs...)
     )
     # p
 end
-function plot_eels(; σ::Real = 20, kwargs...)
+function plot_eels(; σ::Real = 5, kwargs...)
     filenames = [
+        # "data/bilayer/loss_3252_θ=0_0.5_1.0.h5",
+        # "data/bilayer/loss_3252_θ=0_0.5_1.0_new.h5",
+        # "data/bilayer/loss_3252_θ=0_1.63_1.67.h5",
+        # "data/bilayer/loss_3252_θ=5_1.63_1.67.h5",
+        # "data/bilayer/loss_3252_θ=10_1.63_1.67.h5",
+        # "data/bilayer/loss_3252_θ=20_1.63_1.67.h5",
+        # "data/bilayer/loss_3252_θ=30_1.63_1.67.h5",
+        # "data/bilayer/loss_3252_θ=0_0.0_1.0.h5",
+        # "data/bilayer/loss_3252_θ=30_0.0_1.0.h5",
+        # "data/bilayer/loss_3252_θ=0_1.0_2.0.h5",
+        # "data/bilayer/loss_3252_θ=5_1.0_2.0.h5",
+        # "data/bilayer/loss_3252_θ=10_1.0_2.0.h5",
+        # "data/bilayer/loss_3252_θ=20_1.0_2.0.h5",
+        # "data/bilayer/loss_3252_θ=30_1.0_2.0.h5",
+        # "data/bilayer/loss_3252_θ=0_0.0_1.0.h5",
+        # "data/bilayer/loss_3252_θ=5_0.8_1.0.h5",
+        # "data/bilayer/loss_3252_θ=10_0.8_1.0.h5",
+        # "data/bilayer/loss_3252_θ=20_0.8_1.0.h5",
+        # "data/bilayer/loss_3252_θ=30_0.0_1.0.h5",
+        "data/bilayer/loss_3252_θ=30_0.84_0.88.h5",
+        # "data/bilayer/loss_3252_θ=0.h5",
+        # "data/bilayer/loss_3252_θ=10.h5",
+        # "data/bilayer/loss_3252_θ=20.h5",
+        # "data/bilayer/loss_3252_θ=30.h5"
+    ]
+    labels = hcat([
+              # raw"$\theta = 0\degree$"
+              # raw"$\theta = 5\degree$"
+              # raw"$\theta = 10\degree$"
+              # raw"$\theta = 20\degree$"
+              raw"$\theta = 30\degree$"
+              ]...) #  raw"$\theta = 30\degree$"]
+    lines = [0.8566] # nothing # [0.9775 0.985 0.93 1.1925 0.8575]
+    p = plot(
+        xlabel = raw"$\omega\,,\;\mathrm{eV}$",
+        ylabel = raw"$-\mathrm{Im}[1/\varepsilon_1]$",
+        # xlims = (0.8, 1.0),
+        size = (640, 480),
+        dpi = 150,
+        fontfamily = "computer modern"
+    )
+
+    for i in 1:length(filenames)
+        frequencies, eigenvalues = h5open(io->(read(io, "frequencies"), read(io, "eigenvalues")), filenames[i], "r")
+        # mask = @. (frequencies > 0.8) & (frequencies < 1)
+        # frequencies = frequencies[mask]
+        # eigenvalues = eigenvalues[mask]
+
+        loss = @. -imag(1 / eigenvalues)
+        scale = maximum(loss) / maximum(abs.(real.(eigenvalues)))
+        # loss = hcat([smoothen(loss[:, i]; σ = σ) for i in 1:size(loss, 2)]...)
+        plot!(p,
+            frequencies,
+            hcat(loss, scale .* real.(eigenvalues)),
+            width = [2 1],
+            color = [i i],
+            alpha = [1.0 0.5],
+            labels = [labels[i] ""],
+            xlabel = raw"$\omega\,,\;\mathrm{eV}$",
+            ylabel = raw"$-\mathrm{Im}[1/\varepsilon_1]$",
+            markershape = :circle,
+            size = (640, 480),
+            dpi = 150,
+            fontfamily = "computer modern";
+            kwargs...
+        )
+        if !isnothing(lines)
+            vline!(p, [lines[i]], color = i, label = "")
+        end
+    end
+    p
+
+
+    # frequencies = h5open(io->read(io, "frequencies"), first(filenames), "r")
+    # eigenvalues = hcat([h5open(io->read(io, "eigenvalues"), f, "r") for f in filenames]...)
+    # loss = @. -imag(1 / eigenvalues)
+    # # loss = hcat([smoothen(loss[:, i]; σ = σ) for i in 1:size(loss, 2)]...)
+    # p = plot(
+    #     frequencies,
+    #     # loss,
+    #     hcat(loss, 100 .* real.(eigenvalues[:, 1])),
+    #     # xlims = (-0.5, 20),
+    #     width = [2 1],
+    #     labels = labels,
+    #     xlabel = raw"$\omega\,,\;\mathrm{eV}$",
+    #     ylabel = raw"$-\mathrm{Im}[1/\varepsilon_1]$",
+    #     size = (640, 480),
+    #     dpi = 150,
+    #     fontfamily = "computer modern";
+    #     kwargs...
+    # )
+    # vline!(p, [1.665])
+    # p
+end
+function plot_our_eels(; σ::Real = 5, kwargs...)
+    filenames = [
+        # "data/bilayer/loss_3252_θ=0_0.5_1.0.h5",
+        # "data/bilayer/loss_3252_θ=0_0.5_1.0_new.h5",
+        # "data/bilayer/loss_3252_θ=0_1.63_1.67.h5",
+        # "data/bilayer/loss_3252_θ=5_1.63_1.67.h5",
+        # "data/bilayer/loss_3252_θ=10_1.63_1.67.h5",
+        # "data/bilayer/loss_3252_θ=20_1.63_1.67.h5",
+        # "data/bilayer/loss_3252_θ=30_1.63_1.67.h5",
+        # "data/bilayer/loss_3252_θ=0_1.0_2.0.h5",
+        # "data/bilayer/loss_3252_θ=5_1.0_2.0.h5",
+        # "data/bilayer/loss_3252_θ=10_1.0_2.0.h5",
+        # "data/bilayer/loss_3252_θ=5_0.5_1.0.h5",
         "data/bilayer/loss_3252_θ=0.h5",
         "data/bilayer/loss_3252_θ=10.h5",
         "data/bilayer/loss_3252_θ=20.h5",
         "data/bilayer/loss_3252_θ=30.h5"
     ]
-    labels = [raw"$\theta = 0\degree$" raw"$\theta = 10\degree$" raw"$\theta = 20\degree$" raw"$\theta = 30\degree$"]
+    labels = hcat([raw"$\theta = 0\degree$"
+              # raw"$\theta = 5\degree$"
+              raw"$\theta = 10\degree$"
+              raw"$\theta = 20\degree$"
+              raw"$\theta = 30\degree$"
+              ""]...) #  raw"$\theta = 30\degree$"]
     frequencies = h5open(io->read(io, "frequencies"), first(filenames), "r")
     eigenvalues = hcat([h5open(io->read(io, "eigenvalues"), f, "r") for f in filenames]...)
     loss = @. -imag(1 / eigenvalues)
     loss = hcat([smoothen(loss[:, i]; σ = σ) for i in 1:size(loss, 2)]...)
     plot(
         frequencies,
-        hcat(loss, 10 .* real.(eigenvalues[:, 1])),
-        xlims = (0, 2),
-        width = 1,
+        loss,
+        # hcat(loss, 1000 .* real.(eigenvalues[:, 1])),
+        xlims = (-0.5, 20),
+        width = 2,
         labels = labels,
         xlabel = raw"$\omega\,,\;\mathrm{eV}$",
         ylabel = raw"$-\mathrm{Im}[1/\varepsilon_1]$",
