@@ -10,18 +10,18 @@ using ColorSchemes
 # using Dates
 
 
-function all_matrices(filenames::AbstractVector{<:AbstractString}; group_name = "/χ")
-    groups = [h5open(f, "r")[group_name] for f in filenames]
-    datasets = []
-    for g in groups
-        for d in g
-            ω = real(read(attributes(d), "ħω"))
-            push!(datasets, (ω, g.file.filename, HDF5.name(d)))
-        end
-    end
-    sort!(datasets; by = x -> x[1])
-    return ((t[1], h5open(io -> read(io[t[3]]), t[2], "r")) for t in datasets)
-end
+# function all_matrices(filenames::AbstractVector{<:AbstractString}; group_name = "/χ")
+#     groups = [h5open(f, "r")[group_name] for f in filenames]
+#     datasets = []
+#     for g in groups
+#         for d in g
+#             ω = real(read(attributes(d), "ħω"))
+#             push!(datasets, (ω, g.file.filename, HDF5.name(d)))
+#         end
+#     end
+#     sort!(datasets; by = x -> x[1])
+#     return ((t[1], h5open(io -> read(io[t[3]]), t[2], "r")) for t in datasets)
+# end
 
 function combine_outputs(
     filenames::AbstractVector{<:AbstractString},
@@ -73,33 +73,31 @@ function _dielectric(χ::AbstractMatrix{Complex{ℝ}}, V::AbstractMatrix{ℝ}) w
     return @. -(A + 1im * B)
 end
 
-function compute_leading_eigenvalues(filename::AbstractString, V::AbstractMatrix; output::AbstractString)
+function compute_leading_eigenvalues(filename::AbstractString, V::AbstractMatrix; output::AbstractString, n::Integer = 1)
     h5open(filename, "r") do io
         group = io["/χ"]
-        ωs = similar(V, length(group))
-        eigenvalues = similar(V, complex(eltype(V)), length(group))
-        eigenvectors = similar(V, complex(eltype(V)), size(V, 1), length(group))
-        densities = similar(V, complex(eltype(V)), size(V, 1), length(group))
+        number_frequencies = length(group)
+        ωs = similar(V, number_frequencies)
+        eigenvalues = similar(V, complex(eltype(V)), n, number_frequencies)
+        eigenvectors = similar(V, complex(eltype(V)), size(V, 1), n, number_frequencies)
+        densities = similar(V, complex(eltype(V)), size(V, 1), n, number_frequencies)
         for (i, d) in enumerate(io["/χ"])
             ωs[i] = real(read(attributes(d), "ħω"))
             @info "Handling ω = $(ωs[i])..."
             χ = read(d)
             @info "Computing ε..."
-            # t₀ = time_ns()
             ε = _dielectric(χ, V)
-            # @assert ε ≈ dielectric(χ, V)
-            # t₁ = time_ns()
-            # @info "Done in $((t₁ - t₀) / 1e9)..."
             @info "Computing eigen decomposition of ε..."
             t₀ = time_ns()
             f = eigen!(ε)
             t₁ = time_ns()
-            @info "Done in $((t₁ - t₀) / 1e9)..."
+            @info "Done in $((t₁ - t₀) / 1e9) seconds."
             @info "Computing loss..."
-            index = argmax(map(z->-imag(1/z), f.values))
-            eigenvalues[i] = f.values[index]
-            eigenvectors[:, i] .= view(f.vectors, :, index)
-            densities[:, i] .= χ * view(f.vectors, :, index)
+            for (j, k) in enumerate(sortperm(map(z->-imag(1/z), f.values), rev = true)[1:n])
+                eigenvalues[j, i] = f.values[k]
+                eigenvectors[:, j, i] .= view(f.vectors, :, k)
+                densities[:, j, i] .= χ * view(f.vectors, :, k)
+            end
         end
         h5open(output, "w") do outfile
             outfile["frequencies"] = ωs
@@ -600,79 +598,79 @@ function smoothen(xs::AbstractVector; σ::Real = 3)
     smoothen(xs, kernel)
 end
 
-function _plot_dispersion(
-    matrix,
-    qs,
-    ωs;
-    σ::Union{<:Real, Nothing} = nothing,
-    transform,
-    title,
-)
-    matrix = transform(matrix)
-    matrix = clamp.(matrix, 0, 2000)
-    if !isnothing(σ)
-        matrix = smoothen(matrix, σ = σ)
-    end
-    heatmap(
-        qs ./ π,
-        ωs,
-        matrix,
-        xlabel = raw"$q$, $\pi/a$",
-        ylabel = raw"$\hbar\omega$, eV",
-        title = title,
-    )
-end
-plot_polarizability_dispersion(matrix, qs, ωs; kwargs...) = _plot_dispersion(
-    matrix,
-    qs,
-    ωs;
-    transform = (@. χ -> -imag(χ)),
-    title = L"$-\mathrm{Im}\left[\chi(q, \omega)\right]$",
-    kwargs...,
-)
+# function _plot_dispersion(
+#     matrix,
+#     qs,
+#     ωs;
+#     σ::Union{<:Real, Nothing} = nothing,
+#     transform,
+#     title,
+# )
+#     matrix = transform(matrix)
+#     matrix = clamp.(matrix, 0, 2000)
+#     if !isnothing(σ)
+#         matrix = smoothen(matrix, σ = σ)
+#     end
+#     heatmap(
+#         qs ./ π,
+#         ωs,
+#         matrix,
+#         xlabel = raw"$q$, $\pi/a$",
+#         ylabel = raw"$\hbar\omega$, eV",
+#         title = title,
+#     )
+# end
+# plot_polarizability_dispersion(matrix, qs, ωs; kwargs...) = _plot_dispersion(
+#     matrix,
+#     qs,
+#     ωs;
+#     transform = (@. χ -> -imag(χ)),
+#     title = L"$-\mathrm{Im}\left[\chi(q, \omega)\right]$",
+#     kwargs...,
+# )
 
-function plot_single_layer_graphene_polarizability()
-    χᵃᵃ, χᵃᵇ, qs, ωs =
-        h5open("data/single_layer/polarizability_dispersion_1626_11.h5", "r") do io
-            read(io["χᵃᵃ"]), read(io["χᵃᵇ"]), read(io["qs"]), read(io["ωs"])
-        end
-    p₁ = plot_polarizability_dispersion(χᵃᵃ, qs, ωs, σ = 3)
-    p₂ = plot_polarizability_dispersion(χᵃᵇ, qs, ωs, σ = 3)
-    plot!(p₁, colorbar = false)
-    plot!(p₂, title = nothing)
-    savefig(
-        plot(p₁, p₂, size = (900, 400), dpi = 600),
-        "assets/single_layer/polarizability_dispersion.png",
-    )
-    nothing
-end
+# function plot_single_layer_graphene_polarizability()
+#     χᵃᵃ, χᵃᵇ, qs, ωs =
+#         h5open("data/single_layer/polarizability_dispersion_1626_11.h5", "r") do io
+#             read(io["χᵃᵃ"]), read(io["χᵃᵇ"]), read(io["qs"]), read(io["ωs"])
+#         end
+#     p₁ = plot_polarizability_dispersion(χᵃᵃ, qs, ωs, σ = 3)
+#     p₂ = plot_polarizability_dispersion(χᵃᵇ, qs, ωs, σ = 3)
+#     plot!(p₁, colorbar = false)
+#     plot!(p₂, title = nothing)
+#     savefig(
+#         plot(p₁, p₂, size = (900, 400), dpi = 600),
+#         "assets/single_layer/polarizability_dispersion.png",
+#     )
+#     nothing
+# end
 
-function single_layer_graphene_1626_polarizability_dispersion(
-    filenames::AbstractVector{<:AbstractString};
-    output::AbstractString,
-)
-    χs = []
-    qs = nothing
-    ωs = nothing
-    for sublattices in [(1, 1), (1, 2)]
-        m, qs, ωs = dispersion(
-            all_matrices(filenames),
-            armchair_hexagon(10),
-            sublattices;
-            δrs = graphene_δrs,
-            direction = NTuple{3, Float64}((1, 0, 0)),
-            n = 100,
-        )
-        push!(χs, m)
-    end
-    h5open(output, "w") do io
-        io["qs"] = qs
-        io["ωs"] = ωs
-        io["χᵃᵃ"] = χs[1]
-        io["χᵃᵇ"] = χs[2]
-    end
-    nothing
-end
+# function single_layer_graphene_1626_polarizability_dispersion(
+#     filenames::AbstractVector{<:AbstractString};
+#     output::AbstractString,
+# )
+#     χs = []
+#     qs = nothing
+#     ωs = nothing
+#     for sublattices in [(1, 1), (1, 2)]
+#         m, qs, ωs = dispersion(
+#             all_matrices(filenames),
+#             armchair_hexagon(10),
+#             sublattices;
+#             δrs = graphene_δrs,
+#             direction = NTuple{3, Float64}((1, 0, 0)),
+#             n = 100,
+#         )
+#         push!(χs, m)
+#     end
+#     h5open(output, "w") do io
+#         io["qs"] = qs
+#         io["ωs"] = ωs
+#         io["χᵃᵃ"] = χs[1]
+#         io["χᵃᵇ"] = χs[2]
+#     end
+#     nothing
+# end
 
 function plot_eigenvector(lattice::Lattice{3}, vector::AbstractVector; kwargs...)
     x = map(i -> i.position[1], lattice)
