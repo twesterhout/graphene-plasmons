@@ -33,8 +33,12 @@ end
 
 function plot_density_of_states(
     input::AbstractString = joinpath(@__DIR__, "..", "paper", "input");
-    output::Union{AbstractString, Nothing} = joinpath(@__DIR__, "..", "paper", "plots"),
     σ::Real = 0.12,
+    output::Union{AbstractString, Nothing} = joinpath(
+        paper_folder,
+        "plots",
+        "density_of_states.pdf",
+    ),
 )
     filenames =
         filter(s -> !isnothing(match(r"bilayer_graphene.*_θ=.+\.h5", s)), readdir(input))
@@ -48,20 +52,54 @@ function plot_density_of_states(
 
     g = plot(
         xlabel = raw"$E\,,\;\mathrm{eV}$",
-        ylabel = raw"DoS",
+        ylabel = raw"Density of States",
         fontfamily = "computer modern",
-        size = (640, 480),
+        palette = :Set2_8,
+        size = (600, 400),
         dpi = 150,
     )
     for (θ, H) in table
         Es, dos = density_of_states(H, σ = σ)
-        plot!(g, Es, dos.(Es); lw = 1, label = raw"$\theta = " * string(θ) * raw"\degree$")
+        plot!(g, Es, dos.(Es); lw = 2, label = raw"$\theta = " * string(θ) * raw"\degree$")
     end
     if !isnothing(output)
-        if !isdir(output)
-            mkpath(output)
-        end
-        savefig(g, joinpath(output, "bilayer_graphene_density_of_states.pdf"))
+        savefig(g, output)
+    end
+    g
+end
+
+function plot_coulomb_model(;
+    filename::AbstractString = joinpath(bilayer_cRPA_folder, "uqr.h5"),
+    output::Union{AbstractString, Nothing} = joinpath(
+        paper_folder,
+        "plots",
+        "coulomb_model.pdf",
+    ),
+)
+    U, δR, _, _, _ = transform_to_real_space(filename; sublattices = 4)
+    table = sortslices([reshape(δR, :) reshape(U, :)], dims = 1)
+
+    g = plot(
+        ylabel = raw"$U\,,\;\mathrm{eV}$",
+        xlabel = raw"$r\,,\;\AA$",
+        fontfamily = "computer modern",
+        palette = :Set2_8,
+        legend = :topright,
+        xlims = (-0.15, 10.1),
+        ylims = (0, 10),
+        size = (480, 320),
+        dpi = 150,
+        left_margin = 3mm,
+        bottom_margin = 1mm,
+    )
+
+    coulomb = bilayer_graphene_coulomb_model(filename = filename)
+    x = 0.0:0.01:20
+    plot!(g, x, coulomb.(x), color = 3, lw = 4, label = raw"Fit")
+
+    scatter!(g, table[:, 1], table[:, 2], markersize = 5, label = "cRPA data")
+    if !isnothing(output)
+        savefig(g, output)
     end
     g
 end
