@@ -103,3 +103,97 @@ function plot_coulomb_model(;
     end
     g
 end
+
+function _plot_eels_part(; σ::Union{Real, Nothing} = 2)
+    ωs, eigenvalues = h5open(
+        io -> (read(io, "frequencies"), read(io, "eigenvalues")),
+        joinpath(paper_folder, "analysis", "loss_k=10_θ=0.h5"),
+        "r",
+    )
+    eigenvalues = permutedims(eigenvalues)
+    loss = @. -imag(1 / eigenvalues)
+    if !isnothing(σ)
+        loss = hcat([smoothen(loss[:, i]; σ = σ) for i in 1:size(loss, 2)]...)
+    end
+
+    g = plot(
+        # ylabel = raw"$\omega\,,\;\mathrm{eV}$",
+        xlabel = raw"$-\mathrm{Im}[1/\varepsilon_1(\omega)]$",
+        xticks = [0, 20, 40],
+        fontfamily = "computer modern",
+        xmirror = false,
+        ymirror = true,
+        palette = :Set2_8,
+        legend = :bottomright,
+        ylims = (0, 20),
+        size = (200, 400),
+        dpi = 150,
+    )
+    plot!(g, loss[:, 1], ωs, lw = 2, label = raw"$\theta = 0\degree$")
+    g
+end
+function _plot_dispersion_part()
+    ωs, ε = h5open(
+        io -> (read(io, "ω"), read(io, "ε")),
+        joinpath(paper_folder, "analysis", "dispersion_k=10_θ=0.h5"),
+        "r",
+    )
+    qs = 0:(1 / (size(ε, 2) - 1)):1
+
+    function preprocess(A)
+        eigenvalues = eigvals(A)
+        maximum(@. -imag(1 / eigenvalues))
+    end
+
+    data = zeros(real(eltype(ε)), size(ε)[1:2]...)
+    for j in 1:size(data, 2)
+        for i in 1:size(data, 1)
+            data[i, j] = preprocess(ε[i, j, :, :])
+        end
+    end
+    cutoff = findfirst(ω -> ω >= 20, ωs) - 1
+    data = data[3:cutoff, :]
+    ωs = ωs[3:cutoff]
+    data = data[:, 3:(end - 2)]
+    qs = qs[3:(end - 2)]
+    heatmap(
+        qs,
+        ωs,
+        data,
+        tick_direction = :out,
+        xticks = ([0.0, 1.0], [raw"$\Gamma$", raw"$K$"]),
+        framestyle = :box,
+        grid = false,
+        colorbar = false,
+        xlims = (0, 1),
+        ylims = (0, 20),
+        clims = (0, 3),
+        xlabel = raw"$q$",
+        ylabel = raw"$\omega\,,\;\mathrm{eV}$",
+        color = cgrad(:heat),
+        title = raw"$-\mathrm{Im}[1/\varepsilon(\omega, q)]$",
+        xtickfontsize = 12,
+        fontfamily = "computer modern",
+        size = (400, 400),
+        dpi = 150,
+    )
+end
+function plot_dispersion_and_eels(
+    output::Union{AbstractString, Nothing} = joinpath(
+        paper_folder,
+        "plots",
+        "dispersion_and_eels.pdf",
+    ),
+)
+    g = plot(
+        _plot_dispersion_part(),
+        _plot_eels_part(),
+        size = (320 + 160, 320),
+        layout = grid(1, 2, widths = [320 / 480, 160 / 480]),
+        dpi = 200,
+    )
+    if !isnothing(output)
+        savefig(g, output)
+    end
+    g
+end
