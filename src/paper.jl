@@ -31,6 +31,23 @@ function generate_input_files(
     end
 end
 
+function compute_leading_eigenvalues(
+    filename::AbstractString;
+    output::AbstractString,
+    k::Union{Integer, Nothing} = nothing,
+    θ::Union{Real, Nothing} = nothing,
+    n::Integer = 1,
+)
+    if isnothing(k)
+        k = parse(Int, match(r"k=([^._]+)", filename).captures[1])
+    end
+    if isnothing(θ)
+        θ = parse(Int, match(r"θ=([^._]+)", filename).captures[1])
+    end
+    V = bilayer_graphene_coulomb_model(k, θ)
+    compute_leading_eigenvalues(filename, V; output = output, n = n)
+end
+
 function plot_density_of_states(
     input::AbstractString = joinpath(@__DIR__, "..", "paper", "input");
     σ::Real = 0.12,
