@@ -50,6 +50,43 @@ function compute_leading_eigenvalues(
     compute_leading_eigenvalues(filename, V; output = output, n = n)
 end
 
+function compute_dispersion_relation(
+    filename::AbstractString;
+    output::AbstractString,
+    k::Union{Integer, Nothing} = nothing,
+    θ::Union{Real, Nothing} = nothing,
+    n::Integer = 400,
+)
+    if isnothing(k)
+        k = parse(Int, match(r"k=([^._]+)", filename).captures[1])
+    end
+    if isnothing(θ)
+        θ = parse(Int, match(r"θ=([^._]+)", filename).captures[1])
+        @assert θ == 0
+    end
+    lattice = armchair_bilayer_hexagon(k, rotate = θ)
+    ωs, χₖ, εₖ = compute_dispersion_relation(filename, lattice; n = n)
+    h5open(output, "w") do io
+        io["ω"] = ωs
+        io["χ"] = χₖ
+        io["ε"] = εₖ
+    end
+    nothing
+end
+
+function compute_screened_coulomb_interaction(filename::AbstractString; output::AbstractString)
+    k = parse(Int, match(r"k=([^._]+)", filename).captures[1])
+    θ = parse(Int, match(r"θ=([^._]+)", filename).captures[1])
+    lattice = armchair_bilayer_hexagon(k, rotate = θ)
+    χ, V, W = compute_screened_coulomb_interaction(filename, lattice)
+    h5open(output, "w") do io
+        io["χ"] = χ
+        io["V"] = V
+        io["W"] = W
+    end
+    nothing
+end
+
 function compute_density_of_states(
     input::AbstractString = joinpath(@__DIR__, "..", "paper", "input");
     σ::Real = 0.12,

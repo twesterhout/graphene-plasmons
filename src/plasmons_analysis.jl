@@ -185,35 +185,33 @@ function compute_V₀_and_Π₀(; output::AbstractString)
     nothing
 end
 
-function compute_W(ε::AbstractMatrix, V::AbstractMatrix)
+function compute_screened_coulomb_interaction(ε::AbstractMatrix{<:Complex}, V::AbstractMatrix{<:Real})
     inverse_ε = inv(ε)
-    return real(inverse_ε) * V .+ 1im .* (imag(inverse_ε) * V)
+    real(inverse_ε) * V .+ 1im .* (imag(inverse_ε) * V)
 end
-function compute_bilayer_screened_coulomb_interaction(
-    k::Integer,
-    θ::Real;
-    output::AbstractString = ".",
-)
-    prefix = "/vol/tcmscratch04/twesterhout/graphene-plasmons/data/bilayer"
-    lattice = armchair_bilayer_hexagon(k; rotate = θ)
-    filename = "$prefix/output_$(length(lattice))_θ=$(θ)_0.0.h5.0"
+function compute_screened_coulomb_interaction(filename::AbstractString, lattice::Lattice, ω::Real = 0)
     V = bilayer_graphene_coulomb_model(lattice)
     χ = h5open(filename, "r") do io
-        d = io["/χ/0001"]
-        @assert real(read(attributes(d), "ħω")) ≈ 0.0
-        read(d)
+        for d in io["/χ"]
+            if real(read(attributes(d), "ħω")) ≈ ω
+                return read(d)
+            end
+        end
+        @assert false
     end
     ε = _dielectric(χ, V)
-    W = compute_W(ε, V)
+    W = compute_screened_coulomb_interaction(ε, V)
     # @assert ε ≈ I - V * χ
     # @assert W ≈ V .+ V * χ * W
     @assert W ≈ transpose(W)
     @assert all(@. abs(imag(W)) < 1e-5)
-    h5open("$output/W_$(length(lattice))_θ=$(θ).h5", "w") do io
-        io["W"] = W
-    end
-    nothing
+    χ, V, W
+    # h5open("$output/W_$(length(lattice))_θ=$(θ).h5", "w") do io
+    #     io["W"] = W
+    # end
+    # nothing
 end
+
 function plot_bilayer_screened_coulomb_interaction(θ::Real)
     prefix = "."
     distance(lattice, i, j) = 1.42492 * norm(lattice[i].position .- lattice[j].position)
@@ -382,44 +380,35 @@ leading_eigenvalues(filename::AbstractString; kwargs...) =
 #     sum(eigvals(Hermitian(Hk))) / size(Hk, 1)
 # end
 
-function plasmon_dispersion_relation(
-    ε::AbstractMatrix,
-    lattice::Lattice;
-    n::Integer,
-    Gs,
-    δrs,
-)
-    ks, _ = graphene_high_symmetry_points(Gs)
-    Γ, K = ks[1], ks[3]
-    qs = map(q -> Γ .+ (K .- Γ) .* q, 0:(1 / (n - 1)):1)
-    εₖ = dispersion(ε, qs, lattice, δrs)
-end
-function plasmon_dispersion_relation(
+function compute_dispersion_relation(
     filename::AbstractString,
     lattice::Lattice;
     n::Integer,
     Gs = graphene_Gs,
     δrs = bilayer_graphene_δrs,
 )
+    high_symmetry_points, _ = graphene_high_symmetry_points(Gs)
+    Γ, K = high_symmetry_points[1], high_symmetry_points[3]
+    qs = map(q -> Γ .+ (K .- Γ) .* q, 0:(1 / (n - 1)):1)
     V = bilayer_graphene_coulomb_model(lattice)
-    ωs = []
-    dispersion = []
+
+    m = h5open(io -> length(io["/χ"]), filename, "r")
+    sublattices = 4
+    ωs = Vector{Float64}(undef, m)
+    χₖ = Array{ComplexF64, 4}(undef, m, n, sublattices, sublattices)
+    εₖ = Array{ComplexF64, 4}(undef, m, n, sublattices, sublattices)
     h5open(filename, "r") do io
-        for d in io["/χ"]
+        for (i, d) in enumerate(io["/χ"])
             ω = real(read(attributes(d), "ħω"))
             @info "Calculating $ω..."
             χ = read(d)
             ε = _dielectric(χ, V)
-            push!(
-                dispersion,
-                plasmon_dispersion_relation(ε, lattice; n = n, Gs = Gs, δrs = δrs),
-            )
-            push!(ωs, ω)
+            χₖ[i, :, :, :] .= dispersion(χ, qs, lattice, δrs)
+            εₖ[i, :, :, :] .= dispersion(ε, qs, lattice, δrs)
+            ωs[i] = ω
         end
     end
-    ωs = vcat(ωs...)
-    dispersion = vcat((reshape(t, 1, size(t)...) for t in dispersion)...)
-    return ωs, dispersion
+    ωs, χₖ, εₖ
 end
 
 function plot_electronic_properties(
