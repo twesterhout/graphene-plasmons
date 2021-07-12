@@ -7,6 +7,7 @@ function generate_input_file(k::Integer, θ::Real, filename::AbstractString; shi
 end
 function generate_input_files(
     output::AbstractString = joinpath(@__DIR__, "..", "paper", "input"),
+    μ::Real = -0.2,
 )
     k = 10
     θs = [0, 5, 10, 20, 30]
@@ -20,6 +21,7 @@ function generate_input_files(
 
             -energy_at_dirac_point(h, l, Gs = graphene_Gs, δrs = bilayer_graphene_δrs)
         end
+    shift += μ
     for θ in θs
         @info "Generating input file for θ=$(θ)°..."
         generate_input_file(
@@ -48,13 +50,13 @@ function compute_leading_eigenvalues(
     compute_leading_eigenvalues(filename, V; output = output, n = n)
 end
 
-function plot_density_of_states(
+function compute_density_of_states(
     input::AbstractString = joinpath(@__DIR__, "..", "paper", "input");
     σ::Real = 0.12,
     output::Union{AbstractString, Nothing} = joinpath(
         paper_folder,
-        "plots",
-        "density_of_states.pdf",
+        "analysis",
+        "density_of_states.h5",
     ),
 )
     filenames =
@@ -67,6 +69,43 @@ function plot_density_of_states(
     end
     sort!(table, by = t -> t[1])
 
+    h5open(output, "w") do io
+        for (θ, H) in table
+            g = create_group(io, string(θ))
+            eigenvalues = eigvals(Hermitian(H))
+            Es, dos = density_of_states(eigenvalues, σ = σ)
+            g["eigenvalues"] = eigenvalues
+            g["energies"] = collect(Es)
+            g["densities"] = dos.(Es)
+        end
+    end
+    nothing
+end
+
+function plot_density_of_states(
+    input::AbstractString = joinpath(
+        @__DIR__,
+        "..",
+        "paper",
+        "analysis",
+        "density_of_states.h5",
+    );
+    output::Union{AbstractString, Nothing} = joinpath(
+        paper_folder,
+        "plots",
+        "density_of_states.pdf",
+    ),
+)
+    # filenames =
+    #     filter(s -> !isnothing(match(r"bilayer_graphene.*_θ=.+\.h5", s)), readdir(input))
+    # table = []
+    # for f in filenames
+    #     θ = parse(Int, match(r"θ=([^._]+)", f).captures[1])
+    #     H = h5open(io -> read(io, "H"), joinpath(input, f), "r")
+    #     push!(table, (θ, H))
+    # end
+    # sort!(table, by = t -> t[1])
+
     g = plot(
         xlabel = raw"$E\,,\;\mathrm{eV}$",
         ylabel = raw"Density of States",
@@ -75,9 +114,19 @@ function plot_density_of_states(
         size = (600, 400),
         dpi = 150,
     )
-    for (θ, H) in table
-        Es, dos = density_of_states(H, σ = σ)
-        plot!(g, Es, dos.(Es); lw = 2, label = raw"$\theta = " * string(θ) * raw"\degree$")
+    h5open(input, "r") do io
+        for group in io
+            θ = strip(HDF5.name(group), ['/'])
+            energies = read(group, "energies")
+            densities = read(group, "densities")
+            plot!(
+                g,
+                energies,
+                densities;
+                lw = 2,
+                label = raw"$\theta = " * θ * raw"\degree$",
+            )
+        end
     end
     if !isnothing(output)
         savefig(g, output)
@@ -149,30 +198,35 @@ function _plot_eels_part(; σ::Union{Real, Nothing} = 2)
     plot!(g, loss[:, 1], ωs, lw = 2, label = raw"$\theta = 0\degree$")
     g
 end
-function _plot_dispersion_part()
-    ωs, ε = h5open(
-        io -> (read(io, "ω"), read(io, "ε")),
-        joinpath(paper_folder, "analysis", "dispersion_k=10_θ=0.h5"),
+function _plot_dispersion_part(variable::Symbol = :ε)
+    @assert variable == :ε || variable == :χ
+    ωs, A = h5open(
+        io -> (read(io, "ω"), read(io, string(variable))),
+        joinpath(paper_folder, "analysis", "dispersion_k=10_θ=0_0.0_3.0_batch_1.h5"),
         "r",
     )
-    qs = 0:(1 / (size(ε, 2) - 1)):1
+    qs = 0:(1 / (size(A, 2) - 1)):1
 
-    function preprocess(A)
-        eigenvalues = eigvals(A)
-        maximum(@. -imag(1 / eigenvalues))
-    end
-
-    data = zeros(real(eltype(ε)), size(ε)[1:2]...)
-    for j in 1:size(data, 2)
-        for i in 1:size(data, 1)
-            data[i, j] = preprocess(ε[i, j, :, :])
+    function preprocess(M)
+        eigenvalues = eigvals(M)
+        if variable == :ε
+            maximum(@. -imag(1 / eigenvalues))
+        else
+            sum(@. imag(eigenvalues))
         end
     end
-    cutoff = findfirst(ω -> ω >= 20, ωs) - 1
-    data = data[3:cutoff, :]
-    ωs = ωs[3:cutoff]
-    data = data[:, 3:(end - 2)]
-    qs = qs[3:(end - 2)]
+
+    data = zeros(real(eltype(A)), size(A)[1:2]...)
+    for j in 1:size(data, 2)
+        for i in 1:size(data, 1)
+            data[i, j] = preprocess(A[i, j, :, :])
+        end
+    end
+    # cutoff = findfirst(ω -> ω >= 20, ωs) - 1
+    # data = data[3:cutoff, :]
+    # ωs = ωs[3:cutoff]
+    # data = data[:, 3:(end - 2)]
+    # qs = qs[3:(end - 2)]
     heatmap(
         qs,
         ωs,
@@ -181,14 +235,15 @@ function _plot_dispersion_part()
         xticks = ([0.0, 1.0], [raw"$\Gamma$", raw"$K$"]),
         framestyle = :box,
         grid = false,
-        colorbar = false,
-        xlims = (0, 1),
-        ylims = (0, 20),
-        clims = (0, 3),
+        # colorbar = false,
+        xlims = (0, 0.25),
+        # ylims = (0, 20),
+        # clims = (0, 2),
         xlabel = raw"$q$",
         ylabel = raw"$\omega\,,\;\mathrm{eV}$",
         color = cgrad(:heat),
-        title = raw"$-\mathrm{Im}[1/\varepsilon(\omega, q)]$",
+        title = variable == :ε ? raw"$-\mathrm{Im}[1/\varepsilon(\omega, q)]$" :
+                raw"$\mathrm{Im}[\Pi(\omega, q)]$",
         xtickfontsize = 12,
         fontfamily = "computer modern",
         size = (400, 400),
