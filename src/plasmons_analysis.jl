@@ -731,8 +731,9 @@ function plot_eigenvector_bilayer(
         vector[mask];
         title = raw"$\omega = " * string(round(ω; digits = 4)) * raw"\,,\;\mathrm{eV}$",
         colorbar = false,
+        kwargs...
     )
-    p₂ = plot_eigenvector(lattice[.!mask], vector[.!mask]; colorbar = true)
+    p₂ = plot_eigenvector(lattice[.!mask], vector[.!mask]; colorbar = true, kwargs...)
     plot(
         p₁,
         p₂,
@@ -742,7 +743,8 @@ function plot_eigenvector_bilayer(
         layout = grid(1, 2, widths = [0.45, 0.55]),
         fontfamily = "computer modern",
         size = (960, 480),
-        right_margin = 2mm,
+        right_margin = 2mm;
+        kwargs...
     )
 end
 function plot_eigenvector_bilayer(
@@ -756,13 +758,13 @@ function plot_eigenvector_bilayer(
     for (i, ω) in enumerate(frequencies)
         @info "ω = $ω..."
         savefig(
-            plot_eigenvector_bilayer(lattice, eigenvectors[:, i]; ω = ω),
+            plot_eigenvector_bilayer(lattice, eigenvectors[:, 1, i]; ω = ω),
             "$output/eigenvector_" * string(round(Int, 10000 * ω), pad = 6) * ".png",
         )
-        savefig(
-            plot_eigenvector_bilayer(lattice, densities[:, i]; ω = ω),
-            "$output/density_" * string(round(Int, 10000 * ω), pad = 6) * ".png",
-        )
+        # savefig(
+        #     plot_eigenvector_bilayer(lattice, densities[:, 1, i]; ω = ω),
+        #     "$output/density_" * string(round(Int, 10000 * ω), pad = 6) * ".png",
+        # )
     end
     nothing
 end
@@ -817,9 +819,9 @@ function plot_eels(; σ::Real = 5, kwargs...)
         # "data/bilayer/loss_3252_θ=30_1.63_1.67.h5",
         # "data/bilayer/loss_3252_θ=0_0.0_1.0.h5",
         # "data/bilayer/loss_3252_θ=5_0.0_1.0.h5",
-        # "data/bilayer/loss_3252_θ=10_0.0_1.0.h5",
+        # "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=10_0.0_1.0.h5",
         # "data/bilayer/loss_3252_θ=20_0.0_1.0.h5",
-        "data/bilayer/loss_3252_θ=30_0.0_1.0.h5",
+        # "data/bilayer/loss_3252_θ=30_0.0_1.0.h5",
         # "data/bilayer/loss_3252_θ=0_1.0_2.0.h5",
         # "data/bilayer/loss_3252_θ=5_1.0_2.0.h5",
         # "data/bilayer/loss_3252_θ=10_1.0_2.0.h5",
@@ -835,18 +837,20 @@ function plot_eels(; σ::Real = 5, kwargs...)
         # "data/bilayer/loss_3252_θ=10.h5",
         # "data/bilayer/loss_3252_θ=20.h5",
         # "data/bilayer/loss_3252_θ=30.h5"
+        "paper/analysis/loss_k=10_θ=0_0.0_2.0.h5",
+        # "paper/analysis/loss_k=10_θ=30_0.0_2.0.h5",
     ]
     labels = hcat([
     # raw"$\theta = 0\degree$"
     # raw"$\theta = 5\degree$"
-    # raw"$\theta = 10\degree$"
+    raw"$\theta = 10\degree$"
     # raw"$\theta = 20\degree$"
-    raw"$\theta = 30\degree$"]...) #  raw"$\theta = 30\degree$"]
-    lines = [0.93] # nothing # [0.9775 0.985 0.93 1.1925 0.8575]
+    # raw"$\theta = 30\degree$"
+   ]...)
+    lines = [0.705] # [0.9775 0.985 0.93 1.1925 0.8575]
     p = plot(
         xlabel = raw"$\omega\,,\;\mathrm{eV}$",
         ylabel = raw"$-\mathrm{Im}[1/\varepsilon_1]$",
-        xlims = (0.8, 1.0),
         size = (640, 480),
         dpi = 150,
         fontfamily = "computer modern",
@@ -858,9 +862,10 @@ function plot_eels(; σ::Real = 5, kwargs...)
             filenames[i],
             "r",
         )
-        # mask = @. (frequencies > 0.8) & (frequencies < 1)
-        # frequencies = frequencies[mask]
-        # eigenvalues = eigenvalues[mask]
+        eigenvalues = permutedims(eigenvalues)[:, 1]
+        mask = @. (frequencies > 0.5) & (frequencies < 1.0)
+        frequencies = frequencies[mask]
+        eigenvalues = eigenvalues[mask]
 
         loss = @. -imag(1 / eigenvalues)
         scale = maximum(loss) / maximum(abs.(real.(eigenvalues)))
