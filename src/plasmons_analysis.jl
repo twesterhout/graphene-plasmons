@@ -59,6 +59,24 @@ end
 combine_outputs(pattern::AbstractString, output::AbstractString) =
     combine_outputs(glob(basename(pattern), dirname(pattern)), output)
 
+function combine_datasets(
+    filenames::AbstractVector{<:AbstractString};
+    datasets::AbstractVector{<:AbstractString},
+    output::AbstractString,
+    dim::Integer = -1,
+)
+    files = [h5open(f, "r") for f in filenames]
+    h5open(output, "w") do io
+        for d in datasets
+            k = dim < 0 ? ndims(first(files)[d]) + (1 + dim) : dim
+            io[d] = cat((read(f, d) for f in files)...; dims = k)
+        end
+    end
+    nothing
+end
+combine_datasets(pattern::AbstractString; kwargs...) =
+    combine_datasets(glob(basename(pattern), dirname(pattern)); kwargs...)
+
 function _dielectric(χ::AbstractMatrix{Complex{ℝ}}, V::AbstractMatrix{ℝ}) where {ℝ <: Real}
     # ℂ = complex(ℝ)
     if size(χ, 1) != size(χ, 2) || size(χ) != size(V)
@@ -185,11 +203,18 @@ function compute_V₀_and_Π₀(; output::AbstractString)
     nothing
 end
 
-function compute_screened_coulomb_interaction(ε::AbstractMatrix{<:Complex}, V::AbstractMatrix{<:Real})
+function compute_screened_coulomb_interaction(
+    ε::AbstractMatrix{<:Complex},
+    V::AbstractMatrix{<:Real},
+)
     inverse_ε = inv(ε)
     real(inverse_ε) * V .+ 1im .* (imag(inverse_ε) * V)
 end
-function compute_screened_coulomb_interaction(filename::AbstractString, lattice::Lattice, ω::Real = 0)
+function compute_screened_coulomb_interaction(
+    filename::AbstractString,
+    lattice::Lattice,
+    ω::Real = 0,
+)
     V = bilayer_graphene_coulomb_model(lattice)
     χ = h5open(filename, "r") do io
         for d in io["/χ"]
@@ -708,32 +733,49 @@ end
 function plot_eigenvector_bilayer(
     lattice::Lattice{3},
     vector::AbstractVector;
-    ω::Real,
+    ω::Union{<:Real, Nothing} = nothing,
+    title::Union{<:AbstractString, Nothing} = nothing,
+    colorbar = true,
+    limit::Union{<:Real, Nothing} = nothing,
     kwargs...,
 )
     mask = [lattice[i].position[3] ≈ 0 for i in 1:length(lattice)]
     zₘₐₓ = maximum(abs.(extrema((real(z) for z in vector))))
     xlims = (-1, +1) .+ extrema((i.position[1] for i in lattice))
     ylims = (-1, +1) .+ extrema((i.position[2] for i in lattice))
+    color = cgrad(:coolwarm)
+
+    if isnothing(title)
+        title =
+            isnothing(ω) ? "" :
+            raw"$\omega = " * string(round(ω; digits = 4)) * raw"\,,\;\mathrm{eV}$"
+    end
     p₁ = plot_eigenvector(
         lattice[mask],
         vector[mask];
-        title = raw"$\omega = " * string(round(ω; digits = 4)) * raw"\,,\;\mathrm{eV}$",
+        title = title,
         colorbar = false,
-        kwargs...
+        color = color,
+        kwargs...,
     )
-    p₂ = plot_eigenvector(lattice[.!mask], vector[.!mask]; colorbar = true, kwargs...)
+    p₂ = plot_eigenvector(
+        lattice[.!mask],
+        vector[.!mask];
+        colorbar = colorbar,
+        color = color,
+        kwargs...,
+    )
     plot(
         p₁,
         p₂,
         xlims = xlims,
         ylims = ylims,
         clims = (-zₘₐₓ, zₘₐₓ),
-        layout = grid(1, 2, widths = [0.45, 0.55]),
+        layout = grid(1, 2, widths = colorbar ? [0.45, 0.55] : [0.5, 0.5]),
         fontfamily = "computer modern",
         size = (960, 480),
         right_margin = 2mm;
-        kwargs...
+        kwargs...,
     )
 end
 function plot_eigenvector_bilayer(
@@ -826,17 +868,16 @@ function plot_eels(; σ::Real = 5, kwargs...)
         # "data/bilayer/loss_3252_θ=10.h5",
         # "data/bilayer/loss_3252_θ=20.h5",
         # "data/bilayer/loss_3252_θ=30.h5"
-        "paper/analysis/loss_k=10_θ=0_0.0_2.0.h5",
+        "paper/analysis/combined_loss_k=10_θ=0.h5",
         # "paper/analysis/loss_k=10_θ=30_0.0_2.0.h5",
     ]
-    labels = hcat([
-    # raw"$\theta = 0\degree$"
+    labels = hcat([raw"$\theta = 0\degree$"
     # raw"$\theta = 5\degree$"
-    raw"$\theta = 10\degree$"
+    # raw"$\theta = 10\degree$"
     # raw"$\theta = 20\degree$"
     # raw"$\theta = 30\degree$"
-   ]...)
-    lines = [0.705] # [0.9775 0.985 0.93 1.1925 0.8575]
+]...)
+    lines = nothing # [0.7749] # [0.9775 0.985 0.93 1.1925 0.8575]
     p = plot(
         xlabel = raw"$\omega\,,\;\mathrm{eV}$",
         ylabel = raw"$-\mathrm{Im}[1/\varepsilon_1]$",
@@ -852,7 +893,12 @@ function plot_eels(; σ::Real = 5, kwargs...)
             "r",
         )
         eigenvalues = permutedims(eigenvalues)[:, 1]
-        mask = @. (frequencies > 0.5) & (frequencies < 1.0)
+
+        indices = sortperm(frequencies)
+        frequencies = frequencies[indices]
+        eigenvalues = eigenvalues[indices]
+
+        mask = @. (frequencies >= 0.0) & (frequencies <= 1.0)
         frequencies = frequencies[mask]
         eigenvalues = eigenvalues[mask]
 
@@ -876,7 +922,7 @@ function plot_eels(; σ::Real = 5, kwargs...)
             kwargs...,
         )
         if !isnothing(lines)
-            vline!(p, [lines[i]], color = i, label = "")
+            vline!(p, [lines[i]], color = :black, label = "")
         end
     end
     p

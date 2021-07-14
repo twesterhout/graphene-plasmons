@@ -174,44 +174,44 @@ function choose_full_unit_cells(
     indices
 end
 
-# """
-#     nearest_neighbours(sites::Lattice)
-#     nearest_neighbours(sites::Lattice, system::Symbol) -> Vector{NTuple{2, Int}}
-#     nearest_neighbours(sites::Lattice, condition::Function) -> Vector{NTuple{2, Int}}
-#
-# Return a list of nearest neighbours. Indices of sites rather than their positions are
-# returned. Also note that this list does not contain duplicates, i.e. of `(i, j)` and `(j,
-# i)` only one is returned.
-# """
-# function nearest_neighbours(sites::Lattice, condition::Function)
-#     edges = NTuple{2, Int}[]
-#     for i in 1:length(sites)
-#         for j in (i + 1):length(sites)
-#             if condition(i, j)
-#                 push!(edges, (i, j))
-#             end
-#         end
-#     end
-#     edges
-# end
-# function nearest_neighbours(sites::Lattice, system::Symbol)
-#     ε = 1 / 1000
-#     cutoff = 1 + ε
-#     distance(i, j) = norm(sites[i].position .- sites[j].position)
-#     if system == :bilayer
-#         condition =
-#             (i, j) ->
-#                 sites[i].position[3] == sites[j].position[3] && distance(i, j) < cutoff
-#         nearest_neighbours(sites, condition)
-#     elseif system == :single_layer
-#         condition = (i, j) -> distance(i, j) < cutoff
-#         nearest_neighbours(sites, condition)
-#     else
-#         throw(ArgumentError("invalid system: $system; expected either :single_layer or :bilayer"))
-#     end
-# end
-# nearest_neighbours(sites::Lattice{N}) where {N} =
-#     N < 3 ? nearest_neighbours(sites, :single_layer) : nearest_neighbours(sites, :bilayer)
+"""
+    nearest_neighbours(sites::Lattice)
+    nearest_neighbours(sites::Lattice, system::Symbol) -> Vector{NTuple{2, Int}}
+    nearest_neighbours(sites::Lattice, condition::Function) -> Vector{NTuple{2, Int}}
+
+Return a list of nearest neighbours. Indices of sites rather than their positions are
+returned. Also note that this list does not contain duplicates, i.e. of `(i, j)` and `(j,
+i)` only one is returned.
+"""
+function nearest_neighbours(sites::Lattice, condition::Function)
+    edges = NTuple{2, Int}[]
+    for i in 1:length(sites)
+        for j in (i + 1):length(sites)
+            if condition(i, j)
+                push!(edges, (i, j))
+            end
+        end
+    end
+    edges
+end
+function nearest_neighbours(sites::Lattice, system::Symbol)
+    ε = 1 / 1000
+    cutoff = 1 + ε
+    distance(i, j) = norm(sites[i].position .- sites[j].position)
+    if system == :bilayer
+        condition =
+            (i, j) ->
+                sites[i].position[3] == sites[j].position[3] && distance(i, j) < cutoff
+        nearest_neighbours(sites, condition)
+    elseif system == :single_layer
+        condition = (i, j) -> distance(i, j) < cutoff
+        nearest_neighbours(sites, condition)
+    else
+        throw(ArgumentError("invalid system: $system; expected either :single_layer or :bilayer"))
+    end
+end
+nearest_neighbours(sites::Lattice{N}) where {N} =
+    N < 3 ? nearest_neighbours(sites, :single_layer) : nearest_neighbours(sites, :bilayer)
 
 """
     armchair_hexagon(k::Int) -> Lattice{3}
@@ -296,6 +296,13 @@ function _make_edges_plottable(sites, edges)
     return view(data, :, 1), view(data, :, 2)
 end
 
+function center_site_index(sites::Lattice)
+    x = sum(map(i->i.position[1], sites)) / length(sites)
+    y = sum(map(i->i.position[2], sites)) / length(sites)
+    sites = filter(i->i.position[3] ≈ 0, sites)
+    return argmin(map(i->norm((x, y) .- i.position[1:2]), sites))
+end
+
 """
     plot_lattice(sites::Lattice; kwargs...) -> Plot
 
@@ -337,6 +344,19 @@ function plot_lattice(sites::Lattice; sublattices::Bool = true, kwargs...)
             kwargs...,
         )
     end
+    # x = sum(map(i->i.position[1], sites)) / length(sites)
+    # y = sum(map(i->i.position[2], sites)) / length(sites)
+    index = center_site_index(sites)
+    # argmin(map(i->(x - i.position[1])^2 + (y - i.position[2])^2 + i.sublattice, sites))
+    # index = length(sites) ÷ 2 - 1
+    scatter!(
+        p,
+        [sites[index].position[1]],
+        [sites[index].position[2]],
+        markersize = 5,
+        markerstrokewidth = 0.1,
+        color = :red,
+    )
     p
 end
 
