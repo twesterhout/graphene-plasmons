@@ -631,6 +631,7 @@ function bilayer_graphene_hamiltonian_from_dft(
 
     @. prb_99_205134(r, p) = tᵢₙₜₑᵣ[1] * exp(-p[1] * (r - r₀))
     fit = curve_fit(prb_99_205134, dᵢₙₜₑᵣ, tᵢₙₜₑᵣ, [1.0])
+    @info fit.param
 
     H = zeros(Float64, length(lattice), length(lattice))
     for j in 1:size(H, 2)

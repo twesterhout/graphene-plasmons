@@ -273,7 +273,7 @@ function plot_static_polarizability(
     output::Union{AbstractString, Nothing} = joinpath(
         paper_folder,
         "plots",
-        "static_polarizability.pdf",
+        "static_polarizability.png",
     ),
 )
     k = parse(Int, match(r"k=([^._]+)", filename).captures[1])
@@ -290,11 +290,11 @@ function plot_static_polarizability(
             title = raw"$\Pi(r, r' = \mathrm{" * location * raw"}, \omega = 0)$",
             titlefontsize = 24,
             clims = (-0.0005, 0.0005),
-            colorbar = false,
+            colorbar = true,
         )
         push!(plots, p)
     end
-    g = plot(plots..., layout = grid(2, 1), size = (960, 960), dpi = 80)
+    g = plot(plots..., layout = grid(2, 1), size = (960, 960))
     if !isnothing(output)
         savefig(g, output)
     end
@@ -330,11 +330,18 @@ function plot_coulomb_model(;
         bottom_margin = 1mm,
     )
 
-    bare(x) = 14.39964547842567 / x
+    bare(x; ε::Real, δ::Real) = 14.39964547842567 / (ε * sqrt(x^2 + δ^2))
 
     coulomb = bilayer_graphene_coulomb_model(filename = crpa)
     x = 0.0:0.01:20
-    plot!(g, x, bare.(x), color = 5, lw = 4, label = raw"Bare")
+    plot!(
+        g,
+        x,
+        bare.(x; δ = 0.7626534576229569, ε = 2.2597469530289955),
+        color = 5,
+        lw = 4,
+        label = raw"Locally screened",
+    )
     plot!(g, x, coulomb.(x), color = 3, lw = 4, label = raw"Image charge model")
 
     scatter!(g, table[:, 1], table[:, 2], color = 2, markersize = 5, label = "cRPA data")
@@ -355,10 +362,16 @@ end
 function _plot_eels_part(; σ::Union{Real, Nothing} = 2)
     ωs, eigenvalues = h5open(
         io -> (read(io, "frequencies"), read(io, "eigenvalues")),
-        joinpath(paper_folder, "analysis", "loss_k=10_θ=0.h5"),
+        joinpath(paper_folder, "analysis.doping_1.34", "combined_loss_k=10_μ=1.34_θ=0.h5"),
         "r",
     )
     eigenvalues = permutedims(eigenvalues)
+
+    indices = sortperm(ωs)
+    indices = unique(i->ωs[i], indices)
+    ωs = ωs[indices]
+    eigenvalues = eigenvalues[indices]
+
     loss = @. -imag(1 / eigenvalues)
     if !isnothing(σ)
         loss = hcat([smoothen(loss[:, i]; σ = σ) for i in 1:size(loss, 2)]...)
@@ -368,31 +381,41 @@ function _plot_eels_part(; σ::Union{Real, Nothing} = 2)
         # ylabel = raw"$\omega\,,\;\mathrm{eV}$",
         xlabel = raw"$-\mathrm{Im}[1/\varepsilon_1(\omega)]$",
         xticks = [0, 20, 40],
+        xlims = (-5, 55),
         fontfamily = "computer modern",
         xmirror = false,
         ymirror = true,
         palette = :Set2_8,
-        legend = :bottomright,
-        ylims = (0, 20),
+        # legend = :bottomright,
+        ylims = (0, 3),
         size = (200, 400),
         dpi = 150,
     )
-    plot!(g, loss[:, 1], ωs, lw = 2, label = raw"$\theta = 0\degree$")
+    plot!(g, loss[:, 1], ωs, lw = 2, label = "") # raw"$\theta = 0\degree$")
+    plot!(g,
+        [0, 60],
+        [0.63 0.9775 1.195 1.65
+         0.63 0.9775 1.195 1.65],
+        label = "",
+        lw = 2,
+        color = :black,
+        alpha = 0.5,
+        linestyle = :dot
+    )
     g
 end
 function _plot_dispersion_part(variable::Symbol = :ε)
     @assert variable == :ε || variable == :χ
-    ωs, A = h5open(
-        io -> (read(io, "ω"), read(io, string(variable))),
-        joinpath(
-            paper_folder,
-            "analysis.doping_0.2",
-            "dispersion_k=10_θ=0_0.0_0.005_3.0.h5",
-            # "analysis", "dispersion_k=10_θ=0_0.0025_0.005_3.00.h5.0"
-        ),
-        "r",
-    )
+    filename = joinpath(paper_folder, "analysis", "dispersion_k=10_μ=1.34_θ=0.h5")
+    ωs = h5open(io -> read(io, "ω"), filename, "r")
+    iₘₐₓ = findfirst(ω -> ω >= 3, ωs)
+    A = h5open(io -> io[string(variable)][1:iₘₐₓ, :, :, :], filename, "r")
     qs = 0:(1 / (size(A, 2) - 1)):1
+    jₘₐₓ = findfirst(q -> q >= 0.25, qs)
+
+    ωs = ωs[3:iₘₐₓ]
+    qs = collect(qs[3:jₘₐₓ - 2])
+    A = A[3:end, 3:jₘₐₓ - 2, :, :]
 
     function preprocess(M)
         eigenvalues = eigvals(M)
@@ -409,12 +432,10 @@ function _plot_dispersion_part(variable::Symbol = :ε)
             data[i, j] = preprocess(A[i, j, :, :])
         end
     end
-    # cutoff = findfirst(ω -> ω >= 20, ωs) - 1
-    # data = data[3:cutoff, :]
-    # ωs = ωs[3:cutoff]
-    # data = data[:, 3:(end - 2)]
-    # qs = qs[3:(end - 2)]
-    heatmap(
+    # Rescale qs to Å⁻¹
+    Γ, _, K, _ = graphene_high_symmetry_points()[1]
+    qs .*= norm(K .- Γ) / 1.424919
+    p = heatmap(
         qs,
         ωs,
         data,
@@ -423,11 +444,11 @@ function _plot_dispersion_part(variable::Symbol = :ε)
         # xtickfontsize = 12,
         framestyle = :box,
         grid = false,
-        # colorbar = false,
-        xlims = (0, 0.25),
-        # ylims = (0, 20),
+        colorbar = false,
+        xlims = (0, 0.25 * norm(K .- Γ) / 1.424919),
+        ylims = (0, 3),
         clims = variable == :ε ? (0, 3) : (0, 0.4),
-        xlabel = raw"$q\,,\;(\Gamma\rightarrow K)$",
+        xlabel = raw"$q\,,\;\AA^{-1}$",
         ylabel = raw"$\omega\,,\;\mathrm{eV}$",
         color = cgrad(:OrRd_9), # cgrad(:heat),
         title = variable == :ε ? raw"$-\mathrm{Im}[1/\varepsilon(\omega, q)]$" :
@@ -436,6 +457,27 @@ function _plot_dispersion_part(variable::Symbol = :ε)
         size = (400, 400),
         dpi = 150,
     )
+    plot!(p,
+        [0, 0.5],
+        [0.63 0.9775 1.195 1.65
+         0.63 0.9775 1.195 1.65],
+        label = "",
+        lw = 2,
+        color = :black,
+        alpha = 0.5,
+        linestyle = :dot
+    )
+    # scatter!(p,
+    #     [0.039, 0.039, 0.079],
+    #     [1.65, 0.63, 1.195],
+    #     color = palette(:Set2_8),
+    #     markersize = 5,
+    #     markershape = :circle,
+    #     # lw = 5,
+    #     # markerstrokewidth = 5,
+    #     label = "",
+    # )
+    p
 end
 function plot_dispersion_and_eels(
     output::Union{AbstractString, Nothing} = joinpath(
@@ -455,4 +497,431 @@ function plot_dispersion_and_eels(
         savefig(g, output)
     end
     g
+end
+
+function _extract_eigenmode(ω::Real, filename::AbstractString)
+    h5open(filename, "r") do io
+        ωs = read(io, "frequencies")
+        i = findfirst(x -> real(x) == ω, ωs)
+        if isnothing(i)
+            throw(ArgumentError("ω = $ω not found in $filename"))
+        end
+        load(d) = ndims(d) == 2 ? d[:, i] : d[:, 1, i]
+        load(io["eigenvectors"]), load(io["densities"])
+    end
+end
+function plot_non_twisted_eigenmodes(;
+    output::Union{AbstractString, Nothing} = joinpath(
+        paper_folder,
+        "plots",
+        "non_twisted_eigenmodes.png",
+    ),
+)
+    k = 10 # parse(Int, match(r"k=([^._]+)", filename).captures[1])
+    θ = 0 # parse(Int, match(r"θ=([^._]+)", filename).captures[1])
+    lattice = armchair_bilayer_hexagon(k; rotate = θ)
+
+    table = [
+        (1.63, 1.67, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0_1.63_1.67.h5"),
+        (0.0, 1.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0_0.0_1.0.h5"),
+        (1.0, 2.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0_1.0_2.0.h5"),
+        (0.0, 22.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0.h5"),
+    ]
+
+    function picture(ω; type = nothing)
+        i = findfirst(t -> t[1] <= ω && ω <= t[2], table)
+        filename = table[i][3]
+        p = plot_eigenvector_bilayer(
+            lattice,
+            _extract_eigenmode(ω, filename)[1],
+            ω = ω,
+            titlefontsize = 24,
+            colorbar = false,
+            type = type,
+            left_margin = 0mm,
+            right_margin = 0mm,
+            markersize = 4.4,
+            markerstrokewidth = 0,
+            # color = cgrad(:bwr),
+        )
+        p
+    end
+
+    none = plot(ticks=false, border=false, showaxis=false)
+
+    header = plot(xlims = (0, 1), ylims = (0, 1), ticks = false, showaxis = false)
+    annotate!(
+        header,
+        [
+            (x, 1.0, Plots.text(t, 24, :top, "computer modern"))
+            for (x, t) in [(0.1405, raw"bottom\nlayer"), (0.3765, raw"top\nlayer")]
+        ],
+    )
+    g = plot(
+        header,
+        # Separator
+        none,
+        # First column
+        picture(0.3225, type = "layer-polarized"),
+        picture(1.195, type = "dipole"),
+        picture(1.65, type = "1s"),
+        none,
+        # Separator
+        none,
+        # Second column
+        none,
+        picture(0.63),
+        picture(0.9775),
+        picture(1.265),
+        layout = (@layout [header{0.1h}; [_{0.02w} [°; °; °; °] _{0.04w} [°; °; °; °]]]),
+        size = (2 * 720 * 1.06, 4 * 360 * 1.1),
+        # dpi = 80
+    )
+    if !isnothing(output)
+        savefig(g, output)
+    end
+    g
+end
+
+function plot_one_eigenmode(ω::Real, θ::Real, lattice; type = nothing, U = nothing)
+    table = Dict(
+        0 => [
+            (1.63, 1.67, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0_1.63_1.67.h5"),
+            (0.0, 1.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0_0.0_1.0.h5"),
+            (1.0, 2.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0_1.0_2.0.h5"),
+            (0.0, 22.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0.h5"),
+        ],
+        10 => [
+            (1.63, 1.67, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=10_1.63_1.67.h5"),
+            (0.0, 1.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=10_0.0_1.0.h5"),
+            (1.0, 2.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=10_1.0_2.0.h5"),
+            (0.0, 22.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=10.h5"),
+        ],
+        20 => [
+            (1.63, 1.67, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=20_1.63_1.67.h5"),
+            (0.8, 1.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=20_0.8_1.0.h5"),
+            (0.0, 1.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=20_0.0_1.0.h5"),
+            (0.0, 22.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=20.h5"),
+        ],
+        30 => [
+            (1.63, 1.67, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=30_1.63_1.67.h5"),
+            (0.84, 0.88, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=30_0.84_0.88.h5"),
+            (0.0, 1.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=30_0.0_1.0.h5"),
+            (1.0, 2.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=30_1.0_2.0.h5"),
+            (0.0, 22.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=30.h5"),
+        ],
+    )
+
+    i = findfirst(t -> t[1] <= ω && ω <= t[2], table[θ])
+    filename = table[θ][i][3]
+    # lattice = armchair_bilayer_hexagon(10; rotate = θ)
+    # U = bilayer_graphene_coulomb_model(lattice)
+    eigenvector, density = _extract_eigenmode(ω, filename)
+    p₁ = plot_eigenvector_bilayer(
+        lattice,
+        eigenvector,
+        ω = ω,
+        titlefontsize = 24,
+        colorbar = false,
+        type = type,
+        left_margin = 0mm,
+        right_margin = 0mm,
+        markersize = 4.3,
+        markerstrokewidth = 0,
+        # color = cgrad(:bwr),
+    )
+    if isnothing(U)
+        return plot(p₁, size = (720, 360))
+    end
+    p₂ = plot_eigenvector_bilayer(
+        lattice,
+        U * real(eigenvector),
+        title = raw"$\langle\phi_1(\omega)|U$",
+        titlefontsize = 16,
+        colorbar = false,
+        left_margin = 0mm,
+        right_margin = 0mm,
+        markersize = 2.2,
+        markerstrokewidth = 0,
+        # color = cgrad(:bwr),
+    )
+    p₃ = plot_eigenvector_bilayer(
+        lattice,
+        real(density),
+        title = raw"$\Pi(\omega)|\phi_1(\omega)\rangle$",
+        titlefontsize = 16,
+        colorbar = false,
+        left_margin = 0mm,
+        right_margin = 0mm,
+        markersize = 2.1,
+        markerstrokewidth = 0,
+        # color = cgrad(:bwr),
+    )
+    none = plot(ticks=false, border=false, showaxis=false)
+    plot(p₁, none, p₃,
+        layout = (@layout [°{0.66h}; [° °]]),
+        size = (720, 360 + 120),
+        # dpi = 150,
+    )
+end
+function plot_twisted_eigenmodes(θ::Real; k::Integer = 10,
+    output::Union{AbstractString, Nothing} = joinpath(
+        paper_folder,
+        "plots",
+    ),
+)
+    ωs = Dict(
+        0 => (0.63, 1.195, 0.9775, 1.65),
+        10 => (0.405, 1.205, 0.795, 1.663),
+        20 => (0.42, 1.2, 0.815, 1.667),
+        30 => (0.425, 1.1925, 0.8566, 1.695),
+    )
+    lattice = armchair_bilayer_hexagon(k; rotate = θ)
+    U = nothing # θ == 0 || θ == 30 ? bilayer_graphene_coulomb_model(lattice) : nothing
+
+    none = plot(ticks=false, border=false, showaxis=false)
+    header = plot(xlims = (0, 2), ylims = (0, 1), ticks = false, showaxis = false)
+    annotate!(
+        header,
+        [
+            (x, 1.0, Plots.text(t, 24, :top, "computer modern"))
+            for (x, t) in [(0.147, raw"bottom\nlayer"), (0.394, raw"top\nlayer")]
+        ],
+    )
+    plots = [
+        none,
+        plot_one_eigenmode(ωs[θ][1], θ, lattice, type = raw"$" * string(θ) * raw"\degree$", U = U),
+        plot_one_eigenmode(ωs[θ][2], θ, lattice, U = U),
+        none,
+        plot_one_eigenmode(ωs[θ][3], θ, lattice, U = U),
+        plot_one_eigenmode(ωs[θ][4], θ, lattice, U = U),
+    ]
+    if θ == 0
+        plots = (header, plots...)
+    end
+    plot_layout = θ == 0 ? (@layout [°{0.3h}; [°{0.01w} ° ° °{0.02w} ° °]]) : (@layout [°{0.01w} ° ° °{0.02w} ° °])
+    plot_size = (4 * 720, 1 * 360)
+    if θ == 0
+        plot_size = (4 * 720, 1 * 400 * 1.3)
+    #     plot_size = (4 * 720, 1 * 600 * 1.2)
+    # elseif θ == 30
+    #     plot_size = (4 * 720, 1 * 600)
+    end
+    g = plot(
+        plots...,
+        layout = plot_layout,
+        size = plot_size,
+        dpi = 150,
+        # dpi = 80
+    )
+    if !isnothing(output)
+        savefig(g, joinpath(output, "twisted_eigenmodes_θ=$(θ).png"))
+    end
+    g
+end
+
+function plot_pretty_eels(; σ::Real = 2,
+    output::Union{AbstractString, Nothing} = joinpath(
+        paper_folder,
+        "plots",
+        "eels_zoom.pdf"
+    ),
+)
+    prefix = joinpath(paper_folder, "analysis.doping_1.34")
+    p = plot(
+        xlabel = raw"$\omega\,,\;\mathrm{eV}$",
+        ylabel = raw"$-\mathrm{Im}[1/\varepsilon_1(\omega)]$",
+        palette = :Set2_8,
+        yticks = [0, 20, 40, 60],
+        # xlims = (0, 2),
+        legend = :topleft,
+        left_margin = 2mm,
+        size = (480, 200),
+        dpi = 150,
+        fontfamily = "computer modern",
+    )
+    for (i, θ) in enumerate([0, 10, 20, 30])
+        f = joinpath(prefix, "combined_loss_k=10_μ=1.34_θ=$(θ).h5")
+        frequencies, eigenvalues =
+            h5open(io -> (read(io, "frequencies"), read(io, "eigenvalues")), f, "r")
+        if ndims(eigenvalues) > 1
+            eigenvalues = permutedims(eigenvalues)
+            eigenvalues = eigenvalues[:, 1]
+        end
+
+        indices = sortperm(frequencies)
+        indices = unique(i->frequencies[i], indices)
+        frequencies = frequencies[indices]
+        eigenvalues = eigenvalues[indices]
+
+        mask = @. (frequencies >= 0.0) & (frequencies <= 2.0)
+        frequencies = frequencies[mask]
+        eigenvalues = eigenvalues[mask]
+
+        loss = @. -imag(1 / eigenvalues)
+        # scale = maximum(loss) / maximum(abs.(real.(eigenvalues)))
+        if !isnothing(σ)
+            loss = hcat([smoothen(loss[:, i]; σ = σ) for i in 1:size(loss, 2)]...)
+        end
+        plot!(
+            p,
+            frequencies,
+            loss,
+            width = 2,
+            color = i,
+            label = raw"$\theta = " * string(θ) * raw"\degree$",
+        )
+    end
+    if !isnothing(output)
+        savefig(p, output)
+    end
+    p
+end
+
+function plot_non_twisted_eigenmodes_appendix(;
+    output::Union{AbstractString, Nothing} = joinpath(
+        paper_folder,
+        "plots",
+        "non_twisted_eigenmodes_small_doping.png",
+    ),
+)
+    k = 10 # parse(Int, match(r"k=([^._]+)", filename).captures[1])
+    θ = 0 # parse(Int, match(r"θ=([^._]+)", filename).captures[1])
+    lattice = armchair_bilayer_hexagon(k; rotate = θ)
+
+    function picture(ω; type = nothing, kwargs...)
+        filename = joinpath(paper_folder, "analysis", "combined_loss_k=10_θ=0.h5")
+        p = plot_eigenvector_bilayer(
+            lattice,
+            _extract_eigenmode(ω, filename)[1],
+            ω = ω,
+            titlefontsize = 24,
+            colorbar = false,
+            type = type,
+            left_margin = 0mm,
+            right_margin = 0mm,
+            markersize = 4.4,
+            markerstrokewidth = 0;
+            # color = cgrad(:bwr),
+            kwargs...
+        )
+        p
+    end
+
+    none = plot(ticks=false, border=false, showaxis=false)
+
+    header = plot(xlims = (0, 1), ylims = (0, 1), ticks = false, showaxis = false)
+    annotate!(
+        header,
+        [
+            (x, 1.0, Plots.text(t, 24, :top, "computer modern"))
+            for (x, t) in [(0.1405, raw"bottom\nlayer"), (0.3765, raw"top\nlayer")]
+        ],
+    )
+    g = plot(
+        header,
+        # Separator
+        none,
+        # First column
+        picture(0.303, type = "layer-polarized"),
+        picture(0.5678, type = "dipole"),
+        picture(0.5946),
+        picture(0.7349, type = "1s"),
+        # Separator
+        none,
+        # Second column
+        none,
+        picture(0.215, alpha = 0.5),
+        none,
+        picture(0.2493, alpha = 0.5),
+        layout = (@layout [header{0.1h}; [_{0.02w} [°; °; °; °] _{0.04w} [°; °; °; °]]]),
+        size = (2 * 720 * 1.06, 4 * 360 * 1.1),
+        # dpi = 80
+    )
+    if !isnothing(output)
+        savefig(g, output)
+    end
+    g
+end
+
+function plot_excitation_energies(;
+    output::Union{AbstractString, Nothing} = joinpath(
+        paper_folder,
+        "plots",
+        "excitation_energies.pdf",
+    ),
+)
+    θs = [0, 10, 20, 30]
+    table = [
+        1.65 1.663 1.667 1.695
+        1.195 1.205 1.2 1.1925
+        0.9775 0.795 0.815 0.8566
+        0.63 0.405 0.42 0.425
+    ]
+    table = permutedims(table)
+    g = plot(
+        θs,
+        table,
+        labels = [raw"bright 1s" raw"bright dipole" raw"dark 1s" raw"dark dipole"],
+        markersize = 6,
+        markerstrokewidth = 2,
+        linestyle = [:solid :solid :dash :dash],
+        lw = 2,
+        color = [1 2 1 2],
+        markershape = [:circle :diamond :circle :diamond],
+        xlabel = raw"$\theta\,,\;\degree$",
+        ylabel = raw"$\omega\,,\;\mathrm{eV}$",
+        palette = :Set2_8,
+        yticks = [0.5, 1.0, 1.5],
+        ylims = (0.3, 1.8),
+        legend = :outerright,
+        size = (480, 200),
+        dpi = 150,
+        fontfamily = "computer modern",
+        bottom_margin = 2mm,
+    )
+    if !isnothing(output)
+        savefig(g, output)
+    end
+    g
+end
+
+function classical_model()
+    h = 3.35
+    d = 40.0
+
+    position = Dict(
+        1 => (θ -> (d * cos(0), d * sin(0), 0)),
+        2 => (θ -> (d * cos(π + 0), d * sin(π + 0), 0)),
+        3 => (θ -> (d * cos(θ), d * sin(θ), h)),
+        4 => (θ -> (d * cos(π + θ), d * sin(π + θ), h))
+    )
+    sign = Dict(
+        1 => 1,
+        2 => -1,
+        3 => -1,
+        4 => 1,
+    )
+
+    function energy(θ)
+        e = 0.0
+        for i in 1:4
+            for j in 1:4
+                if i != j
+                    t = sign[i] * sign[j] / norm(position[i](θ) .- position[j](θ))
+                    e += t
+                    # @info "" norm(position[i](θ) .- position[j](θ)) t
+                end
+            end
+        end
+        e
+    end
+    # @info "E = $(energy(deg2rad(0)))"
+    # @info "E = $(energy(deg2rad(30)))"
+    # @info "E = $(energy(deg2rad(60)))"
+    plot(
+        0:1:180,
+        energy.(deg2rad.(0:1:180)),
+        xlims=(0, 180),
+    )
 end

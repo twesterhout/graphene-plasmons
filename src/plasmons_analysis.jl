@@ -720,7 +720,7 @@ function plot_eigenvector(lattice::Lattice{3}, vector::AbstractVector; kwargs...
         marker_z = z,
         aspect_ratio = 1,
         markersize = 5,
-        markerstrokewidth = 0,
+        markerstrokewidth = 0.1,
         seriescolor = :balance,
         label = "",
         showaxis = false,
@@ -735,6 +735,7 @@ function plot_eigenvector_bilayer(
     vector::AbstractVector;
     ω::Union{<:Real, Nothing} = nothing,
     title::Union{<:AbstractString, Nothing} = nothing,
+    type::Union{<:AbstractString, Nothing} = nothing,
     colorbar = true,
     limit::Union{<:Real, Nothing} = nothing,
     kwargs...,
@@ -748,21 +749,28 @@ function plot_eigenvector_bilayer(
     if isnothing(title)
         title =
             isnothing(ω) ? "" :
-            raw"$\omega = " * string(round(ω; digits = 4)) * raw"\,,\;\mathrm{eV}$"
+            raw"$\omega = " * string(round(ω; digits = 4)) * raw"\;\;\mathrm{eV}$"
     end
     p₁ = plot_eigenvector(
         lattice[mask],
         vector[mask];
         title = title,
         colorbar = false,
-        color = color,
+        # color = color,
         kwargs...,
     )
+    if !isnothing(type)
+        x = xlims[1] - 3
+        y = sum(map(i->i.position[2], lattice[mask])) / length(lattice[mask])
+        annotate!(p₁,
+            [(x, y, Plots.text(type, 24, :black, :bottom, "computer modern", rotation = 90))]
+        )
+    end
     p₂ = plot_eigenvector(
         lattice[.!mask],
         vector[.!mask];
         colorbar = colorbar,
-        color = color,
+        # color = color,
         kwargs...,
     )
     plot(
@@ -774,7 +782,8 @@ function plot_eigenvector_bilayer(
         layout = grid(1, 2, widths = colorbar ? [0.45, 0.55] : [0.5, 0.5]),
         fontfamily = "computer modern",
         size = (960, 480),
-        right_margin = 2mm;
+        right_margin = 0mm,
+        left_margin = 0mm; # isnothing(type) ? 0mm : 6mm;
         kwargs...,
     )
 end
