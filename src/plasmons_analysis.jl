@@ -10,18 +10,18 @@ using ColorSchemes
 # using Dates
 
 
-function all_matrices(filenames::AbstractVector{<:AbstractString}; group_name = "/χ")
-    groups = [h5open(f, "r")[group_name] for f in filenames]
-    datasets = []
-    for g in groups
-        for d in g
-            ω = real(read(attributes(d), "ħω"))
-            push!(datasets, (ω, g.file.filename, HDF5.name(d)))
-        end
-    end
-    sort!(datasets; by = x -> x[1])
-    return ((t[1], h5open(io -> read(io[t[3]]), t[2], "r")) for t in datasets)
-end
+# function all_matrices(filenames::AbstractVector{<:AbstractString}; group_name = "/χ")
+#     groups = [h5open(f, "r")[group_name] for f in filenames]
+#     datasets = []
+#     for g in groups
+#         for d in g
+#             ω = real(read(attributes(d), "ħω"))
+#             push!(datasets, (ω, g.file.filename, HDF5.name(d)))
+#         end
+#     end
+#     sort!(datasets; by = x -> x[1])
+#     return ((t[1], h5open(io -> read(io[t[3]]), t[2], "r")) for t in datasets)
+# end
 
 function combine_outputs(
     filenames::AbstractVector{<:AbstractString},
@@ -59,6 +59,24 @@ end
 combine_outputs(pattern::AbstractString, output::AbstractString) =
     combine_outputs(glob(basename(pattern), dirname(pattern)), output)
 
+function combine_datasets(
+    filenames::AbstractVector{<:AbstractString};
+    datasets::AbstractVector{<:AbstractString},
+    output::AbstractString,
+    dim::Integer = -1,
+)
+    files = [h5open(f, "r") for f in filenames]
+    h5open(output, "w") do io
+        for d in datasets
+            k = dim < 0 ? ndims(first(files)[d]) + (1 + dim) : dim
+            io[d] = cat((read(f, d) for f in files)...; dims = k)
+        end
+    end
+    nothing
+end
+combine_datasets(pattern::AbstractString; kwargs...) =
+    combine_datasets(glob(basename(pattern), dirname(pattern)); kwargs...)
+
 function _dielectric(χ::AbstractMatrix{Complex{ℝ}}, V::AbstractMatrix{ℝ}) where {ℝ <: Real}
     # ℂ = complex(ℝ)
     if size(χ, 1) != size(χ, 2) || size(χ) != size(V)
@@ -73,33 +91,37 @@ function _dielectric(χ::AbstractMatrix{Complex{ℝ}}, V::AbstractMatrix{ℝ}) w
     return @. -(A + 1im * B)
 end
 
-function compute_leading_eigenvalues(filename::AbstractString, V::AbstractMatrix; output::AbstractString)
+function compute_leading_eigenvalues(
+    filename::AbstractString,
+    V::AbstractMatrix;
+    output::AbstractString,
+    n::Integer = 1,
+)
     h5open(filename, "r") do io
         group = io["/χ"]
-        ωs = similar(V, length(group))
-        eigenvalues = similar(V, complex(eltype(V)), length(group))
-        eigenvectors = similar(V, complex(eltype(V)), size(V, 1), length(group))
-        densities = similar(V, complex(eltype(V)), size(V, 1), length(group))
+        number_frequencies = length(group)
+        ωs = similar(V, number_frequencies)
+        eigenvalues = similar(V, complex(eltype(V)), n, number_frequencies)
+        eigenvectors = similar(V, complex(eltype(V)), size(V, 1), n, number_frequencies)
+        densities = similar(V, complex(eltype(V)), size(V, 1), n, number_frequencies)
         for (i, d) in enumerate(io["/χ"])
             ωs[i] = real(read(attributes(d), "ħω"))
             @info "Handling ω = $(ωs[i])..."
             χ = read(d)
             @info "Computing ε..."
-            # t₀ = time_ns()
             ε = _dielectric(χ, V)
-            # @assert ε ≈ dielectric(χ, V)
-            # t₁ = time_ns()
-            # @info "Done in $((t₁ - t₀) / 1e9)..."
             @info "Computing eigen decomposition of ε..."
             t₀ = time_ns()
             f = eigen!(ε)
             t₁ = time_ns()
-            @info "Done in $((t₁ - t₀) / 1e9)..."
+            @info "Done in $((t₁ - t₀) / 1e9) seconds."
             @info "Computing loss..."
-            index = argmax(map(z->-imag(1/z), f.values))
-            eigenvalues[i] = f.values[index]
-            eigenvectors[:, i] .= view(f.vectors, :, index)
-            densities[:, i] .= χ * view(f.vectors, :, index)
+            for (j, k) in
+                enumerate(sortperm(map(z -> -imag(1 / z), f.values), rev = true)[1:n])
+                eigenvalues[j, i] = f.values[k]
+                eigenvectors[:, j, i] .= view(f.vectors, :, k)
+                densities[:, j, i] .= χ * view(f.vectors, :, k)
+            end
         end
         h5open(output, "w") do outfile
             outfile["frequencies"] = ωs
@@ -120,7 +142,7 @@ function compute_V₀_and_Π₀(χ::AbstractMatrix, V::AbstractMatrix)
     t₁ = time_ns()
     @info "Done in $((t₁ - t₀) / 1e9)..."
     @info "Computing loss..."
-    index = argmax(map(z->-imag(1/z), f.values))
+    index = argmax(map(z -> -imag(1 / z), f.values))
     v₀ = f.vectors[:, index]
     Π₀ = χ * v₀
     V₀ = conj(V * v₀)
@@ -151,10 +173,10 @@ end
 function compute_V₀_and_Π₀(; output::AbstractString)
     prefix = "/vol/tcmscratch04/twesterhout/graphene-plasmons/data/bilayer"
     table = [
-         (0, 0.9775, "$prefix/output_3252_θ=0_0.0_1.0.h5"),
-         (0, 1.65, "$prefix/output_3252_θ=0_1.63_1.67.h5"),
-         (30, 1.695, "$prefix/output_3252_θ=30_1.0_2.0.h5"),
-         (30, 0.8566, "$prefix/output_3252_θ=30_0.84_0.88.h5"),
+        (0, 0.9775, "$prefix/output_3252_θ=0_0.0_1.0.h5"),
+        (0, 1.65, "$prefix/output_3252_θ=0_1.63_1.67.h5"),
+        (30, 1.695, "$prefix/output_3252_θ=30_1.0_2.0.h5"),
+        (30, 0.8566, "$prefix/output_3252_θ=30_0.84_0.88.h5"),
     ]
     for (θ, ħω, filename) in table
         lattice = armchair_bilayer_hexagon(10; rotate = θ)
@@ -169,32 +191,80 @@ function compute_V₀_and_Π₀(; output::AbstractString)
             end
         end
         Π₀, V₀ = compute_V₀_and_Π₀(χ, V)
-        savefig(plot_eigenvector_bilayer(lattice, Π₀; ω = ħω), "$output/Π₀_θ=$(θ)_ω=$(ħω).png")
-        savefig(plot_eigenvector_bilayer(lattice, V₀; ω = ħω), "$output/V₀_θ=$(θ)_ω=$(ħω).png")
+        savefig(
+            plot_eigenvector_bilayer(lattice, Π₀; ω = ħω),
+            "$output/Π₀_θ=$(θ)_ω=$(ħω).png",
+        )
+        savefig(
+            plot_eigenvector_bilayer(lattice, V₀; ω = ħω),
+            "$output/V₀_θ=$(θ)_ω=$(ħω).png",
+        )
     end
     nothing
 end
 
-function compute_W(ε::AbstractMatrix, V::AbstractMatrix)
+function compute_screened_coulomb_interaction(
+    ε::AbstractMatrix{<:Complex},
+    V::AbstractMatrix{<:Real},
+)
     inverse_ε = inv(ε)
-    return real(inverse_ε) * V .+ 1im .* (imag(inverse_ε) * V)
+    real(inverse_ε) * V .+ 1im .* (imag(inverse_ε) * V)
 end
-function compute_bilayer_screened_coulomb_interaction(θ::Real; output::AbstractString)
-    prefix = "/vol/tcmscratch04/twesterhout/graphene-plasmons/data/bilayer"
-    filename = "$prefix/output_3252_θ=$(θ)_0.0.h5"
-    lattice = armchair_bilayer_hexagon(10; rotate = θ)
+function compute_screened_coulomb_interaction(
+    filename::AbstractString,
+    lattice::Lattice,
+    ω::Real = 0,
+)
     V = bilayer_graphene_coulomb_model(lattice)
     χ = h5open(filename, "r") do io
-        d = io["/χ/0001"]
-        @assert real(read(attributes(d), "ħω")) ≈ 0.0
-        read(d)
+        for d in io["/χ"]
+            if real(read(attributes(d), "ħω")) ≈ ω
+                return read(d)
+            end
+        end
+        @assert false
     end
     ε = _dielectric(χ, V)
-    W = compute_W(ε, V)
-    h5open(output, "w") do io
-        io["W"] = W
+    W = compute_screened_coulomb_interaction(ε, V)
+    # @assert ε ≈ I - V * χ
+    # @assert W ≈ V .+ V * χ * W
+    @assert W ≈ transpose(W)
+    @assert all(@. abs(imag(W)) < 1e-5)
+    χ, V, W
+    # h5open("$output/W_$(length(lattice))_θ=$(θ).h5", "w") do io
+    #     io["W"] = W
+    # end
+    # nothing
+end
+
+function plot_bilayer_screened_coulomb_interaction(θ::Real)
+    prefix = "."
+    distance(lattice, i, j) = 1.42492 * norm(lattice[i].position .- lattice[j].position)
+    g = plot(
+        xlabel = raw"$r\,,\;\mathrm{\AA}$",
+        ylabel = raw"$W(r)$",
+        size = (640, 480),
+        dpi = 150,
+        fontfamily = "computer modern",
+    )
+    for k in [6, 8, 10, 12, 14, 16]
+        lattice = armchair_bilayer_hexagon(k; rotate = θ)
+        site = div(length(lattice), 2) # 546 # 843
+        r = [distance(lattice, i, site) for i in 1:length(lattice)]
+        indices = sortperm(r)
+        r = r[indices]
+        W = h5open(
+            io -> real(read(io, "W")[:, site][indices]),
+            "$prefix/W_$(length(lattice))_θ=0.h5",
+            "r",
+        )
+        plot!(g, r, W, label = length(lattice))
+        if k == 10
+            V = bilayer_graphene_coulomb_model(lattice)[:, site][indices]
+            plot!(g, r, V, color = :black, label = "cRPA")
+        end
     end
-    nothing
+    g
 end
 
 function loss_function(ϵ::AbstractVector{<:Complex}; count::Integer = 1)
@@ -253,86 +323,117 @@ leading_eigenvalues(filename::AbstractString; kwargs...) =
 #     return permutedims(matrix), qs, ωs
 # end
 
-function dispersion(
-    A::AbstractMatrix,
-    qs::AbstractVector{NTuple{3, Float64}},
-    lattice::Lattice{3},
-    δrs::AbstractVector{NTuple{3, Float64}},
-)
-    indices = choose_full_unit_cells(lattice; δrs = δrs)
-    out = similar(A, complex(eltype(A)), length(qs), length(δrs), length(δrs))
-    for a in 1:length(δrs)
-        idxᵃ = filter(i -> lattice[i].sublattice == a, indices)
-        rs = map(i -> i.position, lattice[idxᵃ])
-        for b in 1:length(δrs)
-            idxᵇ = filter(i -> lattice[i].sublattice == b, indices)
-            out[:, a, b] .= dispersion(A[idxᵃ, idxᵇ], qs, rs)
-        end
-    end
-    out
-end
-function dispersion(
-    H::AbstractMatrix,
-    lattice::Lattice{3};
-    k₀::NTuple{3, Float64},
-    k₁::NTuple{3, Float64},
-    δrs::AbstractVector{NTuple{3, Float64}},
+# function dispersion(
+#     A::AbstractMatrix,
+#     qs::AbstractVector{NTuple{3, Float64}},
+#     lattice::Lattice{3},
+#     δrs::AbstractVector{NTuple{3, Float64}},
+# )
+#     indices = choose_full_unit_cells(lattice; δrs = δrs)
+#     out = similar(A, complex(eltype(A)), length(qs), length(δrs), length(δrs))
+#     for a in 1:length(δrs)
+#         idxᵃ = filter(i -> lattice[i].sublattice == a, indices)
+#         rs = map(i -> i.position, lattice[idxᵃ])
+#         for b in 1:length(δrs)
+#             idxᵇ = filter(i -> lattice[i].sublattice == b, indices)
+#             out[:, a, b] .= dispersion(A[idxᵃ, idxᵇ], qs, rs)
+#         end
+#     end
+#     out
+# end
+# function dispersion(
+#     H::AbstractMatrix,
+#     lattice::Lattice{3};
+#     k₀::NTuple{3, Float64},
+#     k₁::NTuple{3, Float64},
+#     δrs::AbstractVector{NTuple{3, Float64}},
+#     n::Integer,
+# )
+#     @assert n > 1
+#     qs = map(q -> k₀ .+ (k₁ .- k₀) .* q, 0:(1 / (n - 1)):1)
+#     @assert all(qs[1] .≈ k₀) && all(qs[end] .≈ k₁)
+#     Hk = dispersion(H, qs, lattice, δrs)
+#     Ek = similar(H, real(eltype(H)), size(Hk, 1), size(Hk, 2))
+#     for i in 1:size(Hk, 1)
+#         Ek[i, :] .= sort!(eigvals(Hermitian(Hk[i, :, :])))
+#     end
+#     Ek
+# end
+
+# function band_structure(
+#     H::AbstractMatrix,
+#     lattice::Lattice;
+#     ks::AbstractVector{NTuple{3, Float64}},
+#     δrs::AbstractVector{NTuple{3, Float64}},
+#     n::Int = 100,
+# )
+#     parts = []
+#     ticks = []
+#     scale = minimum((norm(ks[i + 1] .- ks[i]) for i in 1:(length(ks) - 1)))
+#     offset = 0
+#     for i in 1:(length(ks) - 1)
+#         number_points = round(Int, norm(ks[i + 1] .- ks[i]) / scale * n)
+#         xs = (offset + 1):(offset + number_points)
+#         ys =
+#             dispersion(H, lattice; k₀ = ks[i], k₁ = ks[i + 1], δrs = δrs, n = number_points)
+#         if i != length(ks) - 1
+#             number_points -= 1
+#         end
+#         offset += number_points
+#         push!(parts, hcat(xs, ys))
+#         push!(ticks, xs[1])
+#     end
+#     push!(ticks, offset)
+#     vcat(parts...), ticks
+# end
+
+# function graphene_high_symmetry_points(Gs = graphene_Gs)
+#     k(i, j) = @. i * Gs[1] + j * Gs[2]
+#     ks = [k(0, 0), k(1 / 2, 0), k(2 / 3, 1 / 3), k(0, 0)]
+#     ticks = [raw"$\Gamma$", raw"$M$", raw"$K$", raw"$\Gamma$"]
+#     ks, ticks
+# end
+
+# function energy_at_dirac_point(
+#     H::AbstractMatrix,
+#     lattice::Lattice;
+#     Gs = graphene_Gs,
+#     δrs = graphene_δrs,
+# )
+#     K = @. 2 / 3 * Gs[1] + 1 / 3 * Gs[2]
+#     Hk = dispersion(H, [K], lattice, δrs)[1, :, :]
+#     sum(eigvals(Hermitian(Hk))) / size(Hk, 1)
+# end
+
+function compute_dispersion_relation(
+    filename::AbstractString,
+    lattice::Lattice;
     n::Integer,
-)
-    @assert n > 1
-    qs = map(q -> k₀ .+ (k₁ .- k₀) .* q, 0:(1 / (n - 1)):1)
-    @assert all(qs[1] .≈ k₀) && all(qs[end] .≈ k₁)
-    Hk = dispersion(H, qs, lattice, δrs)
-    Ek = similar(H, real(eltype(H)), size(Hk, 1), size(Hk, 2))
-    for i in 1:size(Hk, 1)
-        Ek[i, :] .= sort!(eigvals(Hermitian(Hk[i, :, :])))
-    end
-    Ek
-end
-
-function band_structure(
-    H::AbstractMatrix,
-    lattice::Lattice;
-    ks::AbstractVector{NTuple{3, Float64}},
-    δrs::AbstractVector{NTuple{3, Float64}},
-    n::Int = 100,
-)
-    parts = []
-    ticks = []
-    scale = minimum((norm(ks[i + 1] .- ks[i]) for i in 1:(length(ks) - 1)))
-    offset = 0
-    for i in 1:(length(ks) - 1)
-        number_points = round(Int, norm(ks[i + 1] .- ks[i]) / scale * n)
-        xs = (offset + 1):(offset + number_points)
-        ys =
-            dispersion(H, lattice; k₀ = ks[i], k₁ = ks[i + 1], δrs = δrs, n = number_points)
-        if i != length(ks) - 1
-            number_points -= 1
-        end
-        offset += number_points
-        push!(parts, hcat(xs, ys))
-        push!(ticks, xs[1])
-    end
-    push!(ticks, offset)
-    vcat(parts...), ticks
-end
-
-function graphene_high_symmetry_points(Gs = graphene_Gs)
-    k(i, j) = @. i * Gs[1] + j * Gs[2]
-    ks = [k(0, 0), k(1 / 2, 0), k(2 / 3, 1 / 3), k(0, 0)]
-    ticks = [raw"$\Gamma$", raw"$M$", raw"$K$", raw"$\Gamma$"]
-    ks, ticks
-end
-
-function energy_at_dirac_point(
-    H::AbstractMatrix,
-    lattice::Lattice;
     Gs = graphene_Gs,
-    δrs = graphene_δrs,
+    δrs = bilayer_graphene_δrs,
 )
-    K = @. 2 / 3 * Gs[1] + 1 / 3 * Gs[2]
-    Hk = dispersion(H, [K], lattice, δrs)[1, :, :]
-    sum(eigvals(Hermitian(Hk))) / size(Hk, 1)
+    high_symmetry_points, _ = graphene_high_symmetry_points(Gs)
+    Γ, K = high_symmetry_points[1], high_symmetry_points[3]
+    qs = map(q -> Γ .+ (K .- Γ) .* q, 0:(1 / (n - 1)):1)
+    V = bilayer_graphene_coulomb_model(lattice)
+
+    m = h5open(io -> length(io["/χ"]), filename, "r")
+    sublattices = 4
+    ωs = Vector{Float64}(undef, m)
+    χₖ = Array{ComplexF64, 4}(undef, m, n, sublattices, sublattices)
+    εₖ = Array{ComplexF64, 4}(undef, m, n, sublattices, sublattices)
+    h5open(filename, "r") do io
+        for (i, d) in enumerate(io["/χ"])
+            ω = real(read(attributes(d), "ħω"))
+            @info "Calculating $ω..."
+            χ = read(d)
+            ε = _dielectric(χ, V)
+            χₖ[i, :, :, :] .= dispersion(χ, qs, lattice, δrs)
+            εₖ[i, :, :, :] .= dispersion(ε, qs, lattice, δrs)
+            ωs[i] = ω
+        end
+    end
+    ωs, χₖ, εₖ
 end
 
 function plot_electronic_properties(
@@ -414,15 +515,48 @@ function plot_bilayer_graphene_electronic_properties(k::Integer; θ::Real = 0, k
     )
 end
 
+function plot_bilayer_graphene_density_of_states(k::Integer; σ::Real = 0.12)
+    g = plot(
+        xlabel = raw"$E\,,\;\mathrm{eV}$",
+        ylabel = raw"DoS",
+        fontfamily = "computer modern",
+        size = (640, 480),
+        dpi = 150,
+    )
+    for θ in [0, 5, 10, 20, 30]
+        lattice = armchair_bilayer_hexagon(k, rotate = θ)
+        hamiltonian = bilayer_graphene_hamiltonian_from_dft(lattice)
+        Es, dos = density_of_states(hamiltonian, σ = σ)
+        plot!(
+            g,
+            Es,
+            dos.(Es);
+            fontfamily = "computer modern",
+            lw = 1,
+            label = raw"$\theta = " * string(θ) * raw"\degree$",
+        )
+    end
+    vline!(g, [-1.3436710579345084])
+    g
+end
+
 
 function bilayer_graphene(
     k::Int,
     output::AbstractString;
+    shift::Union{Real, Nothing} = nothing,
     θ::Real = 0.0,
     dataset::AbstractString = "/H",
 )
+    if isnothing(shift)
+        lattice = armchair_bilayer_hexagon(k, rotate = 0)
+        hamiltonian = bilayer_graphene_hamiltonian_from_dft(lattice)
+        shift = -energy_at_dirac_point(hamiltonian, lattice)
+    end
     lattice = armchair_bilayer_hexagon(k, rotate = θ)
     hamiltonian = bilayer_graphene_hamiltonian_from_dft(lattice)
+    @info "Shifting Hamiltonian with $shift..."
+    hamiltonian[diagind(hamiltonian)] .+= shift
     folder = dirname(output)
     if !isdir(folder)
         mkpath(folder)
@@ -502,79 +636,79 @@ function smoothen(xs::AbstractVector; σ::Real = 3)
     smoothen(xs, kernel)
 end
 
-function _plot_dispersion(
-    matrix,
-    qs,
-    ωs;
-    σ::Union{<:Real, Nothing} = nothing,
-    transform,
-    title,
-)
-    matrix = transform(matrix)
-    matrix = clamp.(matrix, 0, 2000)
-    if !isnothing(σ)
-        matrix = smoothen(matrix, σ = σ)
-    end
-    heatmap(
-        qs ./ π,
-        ωs,
-        matrix,
-        xlabel = raw"$q$, $\pi/a$",
-        ylabel = raw"$\hbar\omega$, eV",
-        title = title,
-    )
-end
-plot_polarizability_dispersion(matrix, qs, ωs; kwargs...) = _plot_dispersion(
-    matrix,
-    qs,
-    ωs;
-    transform = (@. χ -> -imag(χ)),
-    title = L"$-\mathrm{Im}\left[\chi(q, \omega)\right]$",
-    kwargs...,
-)
+# function _plot_dispersion(
+#     matrix,
+#     qs,
+#     ωs;
+#     σ::Union{<:Real, Nothing} = nothing,
+#     transform,
+#     title,
+# )
+#     matrix = transform(matrix)
+#     matrix = clamp.(matrix, 0, 2000)
+#     if !isnothing(σ)
+#         matrix = smoothen(matrix, σ = σ)
+#     end
+#     heatmap(
+#         qs ./ π,
+#         ωs,
+#         matrix,
+#         xlabel = raw"$q$, $\pi/a$",
+#         ylabel = raw"$\hbar\omega$, eV",
+#         title = title,
+#     )
+# end
+# plot_polarizability_dispersion(matrix, qs, ωs; kwargs...) = _plot_dispersion(
+#     matrix,
+#     qs,
+#     ωs;
+#     transform = (@. χ -> -imag(χ)),
+#     title = L"$-\mathrm{Im}\left[\chi(q, \omega)\right]$",
+#     kwargs...,
+# )
 
-function plot_single_layer_graphene_polarizability()
-    χᵃᵃ, χᵃᵇ, qs, ωs =
-        h5open("data/single_layer/polarizability_dispersion_1626_11.h5", "r") do io
-            read(io["χᵃᵃ"]), read(io["χᵃᵇ"]), read(io["qs"]), read(io["ωs"])
-        end
-    p₁ = plot_polarizability_dispersion(χᵃᵃ, qs, ωs, σ = 3)
-    p₂ = plot_polarizability_dispersion(χᵃᵇ, qs, ωs, σ = 3)
-    plot!(p₁, colorbar = false)
-    plot!(p₂, title = nothing)
-    savefig(
-        plot(p₁, p₂, size = (900, 400), dpi = 600),
-        "assets/single_layer/polarizability_dispersion.png",
-    )
-    nothing
-end
+# function plot_single_layer_graphene_polarizability()
+#     χᵃᵃ, χᵃᵇ, qs, ωs =
+#         h5open("data/single_layer/polarizability_dispersion_1626_11.h5", "r") do io
+#             read(io["χᵃᵃ"]), read(io["χᵃᵇ"]), read(io["qs"]), read(io["ωs"])
+#         end
+#     p₁ = plot_polarizability_dispersion(χᵃᵃ, qs, ωs, σ = 3)
+#     p₂ = plot_polarizability_dispersion(χᵃᵇ, qs, ωs, σ = 3)
+#     plot!(p₁, colorbar = false)
+#     plot!(p₂, title = nothing)
+#     savefig(
+#         plot(p₁, p₂, size = (900, 400), dpi = 600),
+#         "assets/single_layer/polarizability_dispersion.png",
+#     )
+#     nothing
+# end
 
-function single_layer_graphene_1626_polarizability_dispersion(
-    filenames::AbstractVector{<:AbstractString};
-    output::AbstractString,
-)
-    χs = []
-    qs = nothing
-    ωs = nothing
-    for sublattices in [(1, 1), (1, 2)]
-        m, qs, ωs = dispersion(
-            all_matrices(filenames),
-            armchair_hexagon(10),
-            sublattices;
-            δrs = graphene_δrs,
-            direction = NTuple{3, Float64}((1, 0, 0)),
-            n = 100,
-        )
-        push!(χs, m)
-    end
-    h5open(output, "w") do io
-        io["qs"] = qs
-        io["ωs"] = ωs
-        io["χᵃᵃ"] = χs[1]
-        io["χᵃᵇ"] = χs[2]
-    end
-    nothing
-end
+# function single_layer_graphene_1626_polarizability_dispersion(
+#     filenames::AbstractVector{<:AbstractString};
+#     output::AbstractString,
+# )
+#     χs = []
+#     qs = nothing
+#     ωs = nothing
+#     for sublattices in [(1, 1), (1, 2)]
+#         m, qs, ωs = dispersion(
+#             all_matrices(filenames),
+#             armchair_hexagon(10),
+#             sublattices;
+#             δrs = graphene_δrs,
+#             direction = NTuple{3, Float64}((1, 0, 0)),
+#             n = 100,
+#         )
+#         push!(χs, m)
+#     end
+#     h5open(output, "w") do io
+#         io["qs"] = qs
+#         io["ωs"] = ωs
+#         io["χᵃᵃ"] = χs[1]
+#         io["χᵃᵇ"] = χs[2]
+#     end
+#     nothing
+# end
 
 function plot_eigenvector(lattice::Lattice{3}, vector::AbstractVector; kwargs...)
     x = map(i -> i.position[1], lattice)
@@ -586,7 +720,7 @@ function plot_eigenvector(lattice::Lattice{3}, vector::AbstractVector; kwargs...
         marker_z = z,
         aspect_ratio = 1,
         markersize = 5,
-        markerstrokewidth = 0,
+        markerstrokewidth = 0.1,
         seriescolor = :balance,
         label = "",
         showaxis = false,
@@ -599,23 +733,45 @@ end
 function plot_eigenvector_bilayer(
     lattice::Lattice{3},
     vector::AbstractVector;
-    ω::Real,
+    ω::Union{<:Real, Nothing} = nothing,
+    title::Union{<:AbstractString, Nothing} = nothing,
+    type::Union{<:AbstractString, Nothing} = nothing,
+    colorbar = true,
+    limit::Union{<:Real, Nothing} = nothing,
     kwargs...,
 )
     mask = [lattice[i].position[3] ≈ 0 for i in 1:length(lattice)]
     zₘₐₓ = maximum(abs.(extrema((real(z) for z in vector))))
     xlims = (-1, +1) .+ extrema((i.position[1] for i in lattice))
     ylims = (-1, +1) .+ extrema((i.position[2] for i in lattice))
+    color = cgrad(:coolwarm)
+
+    if isnothing(title)
+        title =
+            isnothing(ω) ? "" :
+            raw"$\omega = " * string(round(ω; digits = 4)) * raw"\;\;\mathrm{eV}$"
+    end
     p₁ = plot_eigenvector(
         lattice[mask],
         vector[mask];
-        title = raw"$\omega = " * string(round(ω; digits = 4)) * raw"\,,\;\mathrm{eV}$",
+        title = title,
         colorbar = false,
+        # color = color,
+        kwargs...,
     )
+    if !isnothing(type)
+        x = xlims[1] - 3
+        y = sum(map(i->i.position[2], lattice[mask])) / length(lattice[mask])
+        annotate!(p₁,
+            [(x, y, Plots.text(type, 24, :black, :bottom, "computer modern", rotation = 90))]
+        )
+    end
     p₂ = plot_eigenvector(
         lattice[.!mask],
         vector[.!mask];
-        colorbar = true,
+        colorbar = colorbar,
+        # color = color,
+        kwargs...,
     )
     plot(
         p₁,
@@ -623,10 +779,12 @@ function plot_eigenvector_bilayer(
         xlims = xlims,
         ylims = ylims,
         clims = (-zₘₐₓ, zₘₐₓ),
-        layout = grid(1, 2, widths = [0.45, 0.55]),
+        layout = grid(1, 2, widths = colorbar ? [0.45, 0.55] : [0.5, 0.5]),
         fontfamily = "computer modern",
         size = (960, 480),
-        right_margin = 2mm,
+        right_margin = 0mm,
+        left_margin = 0mm; # isnothing(type) ? 0mm : 6mm;
+        kwargs...,
     )
 end
 function plot_eigenvector_bilayer(
@@ -640,13 +798,13 @@ function plot_eigenvector_bilayer(
     for (i, ω) in enumerate(frequencies)
         @info "ω = $ω..."
         savefig(
-            plot_eigenvector_bilayer(lattice, eigenvectors[:, i]; ω = ω),
+            plot_eigenvector_bilayer(lattice, eigenvectors[:, 1, i]; ω = ω),
             "$output/eigenvector_" * string(round(Int, 10000 * ω), pad = 6) * ".png",
         )
-        savefig(
-            plot_eigenvector_bilayer(lattice, densities[:, i]; ω = ω),
-            "$output/density_" * string(round(Int, 10000 * ω), pad = 6) * ".png",
-        )
+        # savefig(
+        #     plot_eigenvector_bilayer(lattice, densities[:, 1, i]; ω = ω),
+        #     "$output/density_" * string(round(Int, 10000 * ω), pad = 6) * ".png",
+        # )
     end
     nothing
 end
@@ -686,7 +844,7 @@ function plot_eels(filename::AbstractString; σ::Real = 10, kwargs...)
         xlabel = raw"$\omega\,,\;\mathrm{eV}$",
         ylabel = raw"$-\mathrm{Im}[1/\varepsilon_1]$",
         fontfamily = "computer modern";
-        kwargs...
+        kwargs...,
     )
     # p
 end
@@ -700,6 +858,9 @@ function plot_eels(; σ::Real = 5, kwargs...)
         # "data/bilayer/loss_3252_θ=20_1.63_1.67.h5",
         # "data/bilayer/loss_3252_θ=30_1.63_1.67.h5",
         # "data/bilayer/loss_3252_θ=0_0.0_1.0.h5",
+        # "data/bilayer/loss_3252_θ=5_0.0_1.0.h5",
+        # "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=10_0.0_1.0.h5",
+        # "data/bilayer/loss_3252_θ=20_0.0_1.0.h5",
         # "data/bilayer/loss_3252_θ=30_0.0_1.0.h5",
         # "data/bilayer/loss_3252_θ=0_1.0_2.0.h5",
         # "data/bilayer/loss_3252_θ=5_1.0_2.0.h5",
@@ -711,39 +872,50 @@ function plot_eels(; σ::Real = 5, kwargs...)
         # "data/bilayer/loss_3252_θ=10_0.8_1.0.h5",
         # "data/bilayer/loss_3252_θ=20_0.8_1.0.h5",
         # "data/bilayer/loss_3252_θ=30_0.0_1.0.h5",
-        "data/bilayer/loss_3252_θ=30_0.84_0.88.h5",
+        # "data/bilayer/loss_3252_θ=30_0.84_0.88.h5",
         # "data/bilayer/loss_3252_θ=0.h5",
         # "data/bilayer/loss_3252_θ=10.h5",
         # "data/bilayer/loss_3252_θ=20.h5",
         # "data/bilayer/loss_3252_θ=30.h5"
+        "paper/analysis/combined_loss_k=10_θ=0.h5",
+        # "paper/analysis/loss_k=10_θ=30_0.0_2.0.h5",
     ]
-    labels = hcat([
-              # raw"$\theta = 0\degree$"
-              # raw"$\theta = 5\degree$"
-              # raw"$\theta = 10\degree$"
-              # raw"$\theta = 20\degree$"
-              raw"$\theta = 30\degree$"
-              ]...) #  raw"$\theta = 30\degree$"]
-    lines = [0.8566] # nothing # [0.9775 0.985 0.93 1.1925 0.8575]
+    labels = hcat([raw"$\theta = 0\degree$"
+    # raw"$\theta = 5\degree$"
+    # raw"$\theta = 10\degree$"
+    # raw"$\theta = 20\degree$"
+    # raw"$\theta = 30\degree$"
+]...)
+    lines = nothing # [0.7749] # [0.9775 0.985 0.93 1.1925 0.8575]
     p = plot(
         xlabel = raw"$\omega\,,\;\mathrm{eV}$",
         ylabel = raw"$-\mathrm{Im}[1/\varepsilon_1]$",
-        # xlims = (0.8, 1.0),
         size = (640, 480),
         dpi = 150,
-        fontfamily = "computer modern"
+        fontfamily = "computer modern",
     )
 
     for i in 1:length(filenames)
-        frequencies, eigenvalues = h5open(io->(read(io, "frequencies"), read(io, "eigenvalues")), filenames[i], "r")
-        # mask = @. (frequencies > 0.8) & (frequencies < 1)
-        # frequencies = frequencies[mask]
-        # eigenvalues = eigenvalues[mask]
+        frequencies, eigenvalues = h5open(
+            io -> (read(io, "frequencies"), read(io, "eigenvalues")),
+            filenames[i],
+            "r",
+        )
+        eigenvalues = permutedims(eigenvalues)[:, 1]
+
+        indices = sortperm(frequencies)
+        frequencies = frequencies[indices]
+        eigenvalues = eigenvalues[indices]
+
+        mask = @. (frequencies >= 0.0) & (frequencies <= 1.0)
+        frequencies = frequencies[mask]
+        eigenvalues = eigenvalues[mask]
 
         loss = @. -imag(1 / eigenvalues)
         scale = maximum(loss) / maximum(abs.(real.(eigenvalues)))
         # loss = hcat([smoothen(loss[:, i]; σ = σ) for i in 1:size(loss, 2)]...)
-        plot!(p,
+        plot!(
+            p,
             frequencies,
             hcat(loss, scale .* real.(eigenvalues)),
             width = [2 1],
@@ -752,14 +924,14 @@ function plot_eels(; σ::Real = 5, kwargs...)
             labels = [labels[i] ""],
             xlabel = raw"$\omega\,,\;\mathrm{eV}$",
             ylabel = raw"$-\mathrm{Im}[1/\varepsilon_1]$",
-            markershape = :circle,
+            # markershape = :circle,
             size = (640, 480),
             dpi = 150,
             fontfamily = "computer modern";
-            kwargs...
+            kwargs...,
         )
         if !isnothing(lines)
-            vline!(p, [lines[i]], color = i, label = "")
+            vline!(p, [lines[i]], color = :black, label = "")
         end
     end
     p
@@ -802,16 +974,19 @@ function plot_our_eels(; σ::Real = 5, kwargs...)
         "data/bilayer/loss_3252_θ=0.h5",
         "data/bilayer/loss_3252_θ=10.h5",
         "data/bilayer/loss_3252_θ=20.h5",
-        "data/bilayer/loss_3252_θ=30.h5"
+        "data/bilayer/loss_3252_θ=30.h5",
     ]
-    labels = hcat([raw"$\theta = 0\degree$"
-              # raw"$\theta = 5\degree$"
-              raw"$\theta = 10\degree$"
-              raw"$\theta = 20\degree$"
-              raw"$\theta = 30\degree$"
-              ""]...) #  raw"$\theta = 30\degree$"]
-    frequencies = h5open(io->read(io, "frequencies"), first(filenames), "r")
-    eigenvalues = hcat([h5open(io->read(io, "eigenvalues"), f, "r") for f in filenames]...)
+    labels = hcat([
+        raw"$\theta = 0\degree$"
+        # raw"$\theta = 5\degree$"
+        raw"$\theta = 10\degree$"
+        raw"$\theta = 20\degree$"
+        raw"$\theta = 30\degree$"
+        ""
+    ]...) #  raw"$\theta = 30\degree$"]
+    frequencies = h5open(io -> read(io, "frequencies"), first(filenames), "r")
+    eigenvalues =
+        hcat([h5open(io -> read(io, "eigenvalues"), f, "r") for f in filenames]...)
     loss = @. -imag(1 / eigenvalues)
     loss = hcat([smoothen(loss[:, i]; σ = σ) for i in 1:size(loss, 2)]...)
     plot(
@@ -826,7 +1001,51 @@ function plot_our_eels(; σ::Real = 5, kwargs...)
         size = (640, 480),
         dpi = 150,
         fontfamily = "computer modern";
-        kwargs...
+        kwargs...,
     )
     # p
+end
+
+function plot_plasmon_dispersion(
+    filename::AbstractString = "dispersion_3252_θ=0.h5";
+    variable = :χ,
+)
+    dataset = variable == :χ ? "polarizability_dispersion" : "dielectric_dispersion"
+    title =
+        variable == :χ ? raw"$\mathrm{Im}[\chi(\hbar\omega, q)]$" :
+        raw"$-\mathrm{Im}[1/\varepsilon(\hbar\omega, q)]$"
+    ωs, εₖ = h5open(io -> (read(io, "frequencies"), read(io, dataset)), filename, "r")
+    qs = 0:(1 / (size(εₖ, 2) - 1)):1
+    function preprocess(A)
+        # -imag(1 / A[1, 1])
+        eigenvalues = eigvals(A)
+        if variable == :χ
+            sum(@. imag(eigenvalues))
+        else
+            maximum(@. -imag(1 / eigenvalues))
+        end
+    end
+    data = zeros(real(eltype(εₖ)), size(εₖ)[1:2]...)
+    for j in 1:size(data, 2)
+        for i in 1:size(data, 1)
+            data[i, j] = preprocess(εₖ[i, j, :, :])
+        end
+    end
+    heatmap(
+        qs,
+        ωs,
+        data,
+        xticks = ([0.0, 1.0], [raw"$\Gamma$", raw"$K$"]),
+        xlabel = raw"$q$",
+        ylabel = raw"$\hbar\omega\,,\;\mathrm{eV}$",
+        color = cgrad(:heat),
+        clims = (0, 7),
+        title = title,
+        xtickfontsize = 12,
+        size = (640, 480),
+        dpi = 150,
+        fontfamily = "computer modern",
+        right_margin = 2mm,
+        left_margin = 2mm,
+    )
 end

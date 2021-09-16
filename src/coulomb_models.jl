@@ -4,7 +4,6 @@ using LinearAlgebra
 using Plots
 using LsqFit
 
-
 function transform_to_real_space(
     filename::AbstractString;
     qpoints::Int = 18,
@@ -53,14 +52,14 @@ function transform_to_real_space(
     return U_r, δR, R₁, R₂, rs
 end
 
-function multipole_expansion_fit(r, U)
-    # e / 4πε₀ in eV⋅Å
-    scale = 14.39964547842567
-    @. model(r, p) = scale * (p[1] / sqrt(r^2 + p[2]^2)) * (1 + exp(-p[3] * r^2))
-    fit = curve_fit(model, r, U, [1.0, 0.1, 1.0])
-    @info "" fit.param
-    return x -> model(x, fit.param)
-end
+# function multipole_expansion_fit(r, U)
+#     # e / 4πε₀ in eV⋅Å
+#     scale = 14.39964547842567
+#     @. model(r, p) = scale * (p[1] / sqrt(r^2 + p[2]^2)) * (1 + exp(-p[3] * r^2))
+#     fit = curve_fit(model, r, U, [1.0, 0.1, 1.0])
+#     @info "" fit.param
+#     return x -> model(x, fit.param)
+# end
 
 function image_charge_model(ρ, d, ε₁, ε₂, ε₃, δ::Real; maxiter::Integer)
     # e / 4πε₀ in eV⋅Å
@@ -78,18 +77,17 @@ function image_charge_model(ρ, d, ε₁, ε₂, ε₃, δ::Real; maxiter::Integ
     )
     return scale / ε₁ * (t₀ + 2 * t₁ + (L₁₂ + L₁₃) * t₂)
 end
-function image_charge_model_fit(r, U; maxiter::Integer = 20, ε₂::Real = 1, ε₃::Real = 1)
-    d = 6.7
-    @. model(r, p) = image_charge_model(r, d, p[2], ε₂, ε₃, p[3]; maxiter = maxiter)
-    fit = curve_fit(
-        model,
-        r,
-        U,
-        [d, 2.2, 0.78],
-        lower = [1.0, 1.0, 0.01],
-        upper = [10.0, 10.0, 2.0],
-    )
-    @info "d = $(fit.param[1]), ε₁ = $(fit.param[2]), δ = $(fit.param[3])"
+function image_charge_model_fit(
+    r,
+    U;
+    d::Real,
+    maxiter::Integer = 20,
+    ε₂::Real = 1,
+    ε₃::Real = 1,
+)
+    @. model(r, p) = image_charge_model(r, d, p[1], ε₂, ε₃, p[2]; maxiter = maxiter)
+    fit = curve_fit(model, r, U, [2.0, 0.5])
+    @info "d = $d, ε₁ = $(fit.param[1]), δ = $(fit.param[2])"
     return x -> model(
         x,
         # [6.7, 2.20151908, 0.78159943])
@@ -100,37 +98,33 @@ end
 #     n_max = 10
 #     e2 = 14.3999
 #     beta = (e_m - e_env) / (e_m + e_env)
-#     
+#
 #     def z(r, n, h, d):
 #         return np.sqrt(r**2. + d**2.0 + (n*h)**2.)
-#     
+#
 #     u_r = e2 / (e_m * z(r, 0, h, d))
 #     print(u_r)
-#     
+#
 #     for n in range(1, n_max):
 #         print(2. * e2 * beta**n / (e_m * z(r, n, h, d)))
 #         u_r += 2. * e2 * beta**n / (e_m * z(r, n, h, d))
-#     
+#
 #     return u_r
 
-function bilayer_graphene_coulomb_model(
-    filename::AbstractString = "data/03_BL_AB/H_25_K_18_B_128_d_3.35/03_cRPA/uqr.h5",
+function bilayer_graphene_coulomb_model(;
+    filename::AbstractString = joinpath(bilayer_cRPA_folder, "uqr.h5"),
+    cutoff::Real = 10,
 )
     U_r, δR, R₁, R₂, rs = transform_to_real_space(filename; sublattices = 4)
     table = sortslices([reshape(δR, :) reshape(U_r, :)], dims = 1)
-    mask = table[:, 1] .< 10
-    fit = image_charge_model_fit(table[mask, 1], table[mask, 2]) # multipole_expansion_fit(table[mask, 1], table[mask, 2])
-    # @info "" table[1:5, :]
-    # r-> abs(r) < 1 ? table[1, 2] : fit(r)
+    mask = table[:, 1] .< cutoff # Only use points up to 10 Å.
+    image_charge_model_fit(table[mask, 1], table[mask, 2], d = 6.7)
 end
-function bilayer_graphene_coulomb_model(
-    lattice::Lattice{3};
-    filename::AbstractString = "data/03_BL_AB/H_25_K_18_B_128_d_3.35/03_cRPA/uqr.h5",
-)
-    fit = bilayer_graphene_coulomb_model(filename)
+function bilayer_graphene_coulomb_model(lattice::Lattice{3}; kwargs...)
+    fit = bilayer_graphene_coulomb_model(; kwargs...)
     model(i, j) = fit(1.42492 * norm(lattice[i].position .- lattice[j].position))
     V = Matrix{Float64}(undef, length(lattice), length(lattice))
-    for j in 1:size(V, 2)
+    @inbounds Threads.@threads for j in 1:size(V, 2)
         V[j, j] = model(j, j)
         for i in (j + 1):size(V, 1)
             V[i, j] = model(i, j)
@@ -139,41 +133,43 @@ function bilayer_graphene_coulomb_model(
     end
     V
 end
+bilayer_graphene_coulomb_model(k::Integer, θ::Real; kwargs...) =
+    bilayer_graphene_coulomb_model(armchair_bilayer_hexagon(k; rotate = θ); kwargs...)
 
-function plot_bilayer_graphene_coulomb_model(
-    filename::AbstractString = "data/03_BL_AB/H_25_K_18_B_128_d_3.35/03_cRPA/uqr.h5",
-)
-    U_r, δR, R₁, R₂, rs = transform_to_real_space(filename; sublattices = 4)
-    _get_table(a, b) = sortslices(
-        [reshape(view(δR, :, :, a, b), :) reshape(view(U_r, :, :, a, b), :)],
-        dims = 1,
-    )
-    p = plot(
-        ylabel = raw"$U\,,\;\mathrm{eV}$",
-        xlabel = raw"$r\,,\;\AA$",
-        fontfamily = "computer modern",
-        legend = :topright,
-        size = (900, 700),
-        xlims = (0, 10),
-        ylims = (0, 10),
-        left_margin = 3mm,
-        bottom_margin = 1mm,
-    )
-    sublattices = ["A", "B", "A'", "B'"]
-    coulomb = bilayer_graphene_coulomb_model(filename)
-    x = 0.0:0.01:20
-    plot!(p, x, coulomb.(x), color = :black, lw = 4, label = raw"Fit")
-
-    a = 1
-    for b in 1:4
-        table = _get_table(a, b)
-        scatter!(p,
-            table[:, 1],
-            table[:, 2],
-            markersize = 5,
-            color = b,
-            label = "$(sublattices[a])-$(sublattices[b])",
-        )
-    end
-    p
-end
+# function plot_bilayer_graphene_coulomb_model(
+#     filename::AbstractString = "data/03_BL_AB/H_25_K_18_B_128_d_3.35/03_cRPA/uqr.h5",
+# )
+#     U_r, δR, R₁, R₂, rs = transform_to_real_space(filename; sublattices = 4)
+#     _get_table(a, b) = sortslices(
+#         [reshape(view(δR, :, :, a, b), :) reshape(view(U_r, :, :, a, b), :)],
+#         dims = 1,
+#     )
+#     p = plot(
+#         ylabel = raw"$U\,,\;\mathrm{eV}$",
+#         xlabel = raw"$r\,,\;\AA$",
+#         fontfamily = "computer modern",
+#         legend = :topright,
+#         size = (900, 700),
+#         xlims = (0, 10),
+#         ylims = (0, 10),
+#         left_margin = 3mm,
+#         bottom_margin = 1mm,
+#     )
+#     sublattices = ["A", "B", "A'", "B'"]
+#     coulomb = bilayer_graphene_coulomb_model(filename)
+#     x = 0.0:0.01:20
+#     plot!(p, x, coulomb.(x), color = :black, lw = 4, label = raw"Fit")
+# 
+#     a = 1
+#     for b in 1:4
+#         table = _get_table(a, b)
+#         scatter!(p,
+#             table[:, 1],
+#             table[:, 2],
+#             markersize = 5,
+#             color = b,
+#             label = "$(sublattices[a])-$(sublattices[b])",
+#         )
+#     end
+#     p
+# end
