@@ -41,6 +41,7 @@ end
 hasmagma() = !isempty(libmagma())
 
 const magma_int_t = Cint
+const magma_device_t = magma_int_t
 
 @cenum magma_vec_t::UInt begin
     MagmaNoVec = 301
@@ -60,9 +61,14 @@ function magma_finalize()
     ccall((:magma_finalize, libmagma()), magma_int_t, ())
 end
 
-function magma_geev()
-
+function magma_getdevice()
+    device = Ref{magma_device_t}()
+    ccall((:magma_getdevice, libmagma()), Cvoid, (Ref{magma_device_t},), device)
+    return device[]
 end
+
+magma_setdevice(device::Integer) =
+    ccall((:magma_setdevice, libmagma()), Cvoid, (magma_device_t,), device)
 
 # function chkfinite(A::AbstractMatrix)
 #     for a in A
