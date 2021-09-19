@@ -12,11 +12,11 @@ rpa_mu=0                              # RPA chemical potential μ in eV
 damping=0.001                     # Damping η in eV
 k=10 # Sample size
 hamiltonian_mu=1.34  # Hamiltonian chemical potential
-theta=0 # Twisting angle
+theta=2 # Twisting angle
 input_prefix="paper/input"
 output_prefix="paper/output"
-desired_frequencies=$(seq 0.75 0.0005 1.9999)
-number_nodes=40
+desired_frequencies=$(seq 0.75 0.0005 0.9999)
+number_nodes=10
 
 number_freq=$(echo "$desired_frequencies" | wc -l)
 chunk_size=$(( (number_freq + (number_nodes - 1)) / number_nodes ))

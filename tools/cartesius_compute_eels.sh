@@ -18,15 +18,15 @@ job_index=$1
 chunk_size=1
 first_index=$((1 + job_index * chunk_size))
 
-coulomb_theta=3
+coulomb_theta=5
 
 for device in 0 1; do
     rm -f slurm-${SLURM_JOB_ID}_$device.out
 done
-for f in $(find paper/output/ -name 'output_k=10_*part=*.h5.0' | grep -E 'part=[0-7]\.' | sort | tail -n +${first_index} | head -n ${chunk_size}); do
+for f in $(find paper/output/ -name 'output_k=10_μ=1.34_θ=0_part=*.h5.0' | grep -E 'part=[0-7]\.' | sort | tail -n +${first_index} | head -n ${chunk_size}); do
 	base_name="${f%.0}"
 	out_name="${base_name/output_k/loss_k}"
-	out_name="${base_name/θ=/α=${coulomb_theta}_θ=}"
+	out_name="${out_name/θ=/α=${coulomb_theta}_θ=}"
 	# echo "${out_name}"
     for device in 0 1; do
 		unbuffer julia --project=/home/twest/graphene-plasmons -e "
