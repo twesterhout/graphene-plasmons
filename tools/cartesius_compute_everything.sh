@@ -6,6 +6,8 @@
 set -e
 set -o pipefail
 
+module load magma/2.5.4-fosscuda-2020a
+
 export OMP_NUM_THREADS=8          # 2 processes with 8 cores each
 kT=0.0256                         # Temperature in eV
 rpa_mu=0                              # RPA chemical potential μ in eV
