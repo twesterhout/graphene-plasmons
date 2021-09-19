@@ -96,6 +96,7 @@ function compute_leading_eigenvalues(
     V::AbstractMatrix;
     output::AbstractString,
     n::Integer = 1,
+    compute_eigenvectors::Bool = true,
 )
     h5open(filename, "r") do io
         group = io["/χ"]
@@ -104,6 +105,7 @@ function compute_leading_eigenvalues(
         eigenvalues = similar(V, complex(eltype(V)), n, number_frequencies)
         eigenvectors = similar(V, complex(eltype(V)), size(V, 1), n, number_frequencies)
         densities = similar(V, complex(eltype(V)), size(V, 1), n, number_frequencies)
+        _rv = compute_eigenvectors ? 'V' : 'N'
         for (i, d) in enumerate(io["/χ"])
             ωs[i] = real(read(attributes(d), "ħω"))
             @info "Handling ω = $(ωs[i])..."
@@ -112,15 +114,17 @@ function compute_leading_eigenvalues(
             ε = _dielectric(χ, V)
             @info "Computing eigen decomposition of ε..."
             t₀ = time_ns()
-            f = eigen!(ε)
+            values, _, vectors = hasmagma() ? magma_geev!('N', _rv, ε) : LAPACK.geev!('N', _rv, ε)
             t₁ = time_ns()
             @info "Done in $((t₁ - t₀) / 1e9) seconds."
             @info "Computing loss..."
             for (j, k) in
-                enumerate(sortperm(map(z -> -imag(1 / z), f.values), rev = true)[1:n])
-                eigenvalues[j, i] = f.values[k]
-                eigenvectors[:, j, i] .= view(f.vectors, :, k)
-                densities[:, j, i] .= χ * view(f.vectors, :, k)
+                enumerate(sortperm(map(z -> -imag(1 / z), values), rev = true)[1:n])
+                eigenvalues[j, i] = values[k]
+                if compute_eigenvectors
+                    eigenvectors[:, j, i] .= view(vectors, :, k)
+                    densities[:, j, i] .= χ * view(vectors, :, k)
+                end
             end
         end
         h5open(output, "w") do outfile
