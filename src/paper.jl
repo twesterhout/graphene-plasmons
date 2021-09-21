@@ -856,20 +856,30 @@ function plot_focused_eels(;
         ylabel = raw"$-\mathrm{Im}[1/\varepsilon_1(\omega)]$",
         palette = :Set2_8,
         # yticks = [0, 20, 40, 60],
-        xlims = (0.95, 1),
-        ylims = (0, 20),
+        xlims = (0.78, 1),
+        ylims = (0, 15),
         legend = :topleft,
         left_margin = 2mm,
         size = (640, 480),
         dpi = 150,
         fontfamily = "computer modern",
     )
-    for (i, α) in enumerate([0, 3, 5, 10])
-        f::String = ""
-        if α == 0
-            f = joinpath(prefix, "loss_k=10_μ=1.34_θ=0_0.75_1.0.h5")
-        else
-            f = joinpath(prefix, "loss_k=10_μ=1.34_α=$(α)_θ=0.h5")
+    filenames = [
+        joinpath(prefix, "loss_k=10_μ=1.34_θ=0_0.75_1.0.h5"),
+        joinpath(prefix, "loss_k=10_μ=1.34_α=10_θ=0.h5"),
+        joinpath(prefix, "loss_k=10_μ=1.34_α=0_θ=10.h5"),
+        joinpath(prefix, "loss_k=10_μ=1.34_θ=10.h5"),
+        # joinpath(prefix, "loss_k=10_μ=1.34_α=1_θ=0.h5"),
+        # joinpath(prefix, "loss_k=10_μ=1.34_θ=1.h5"),
+        # joinpath(prefix, "loss_k=10_μ=1.34_α=0_θ=1.h5"),
+        # joinpath(prefix, "loss_k=10_μ=1.34_θ=2.h5"),
+        # joinpath(prefix, "loss_k=10_μ=1.34_α=3_θ=0.h5"),
+        # joinpath(prefix, "loss_k=10_μ=1.34_α=5_θ=0.h5"),
+    ]
+    for (i, f) in enumerate(filenames)
+        θ = parse(Int, match(r"θ=([^._]+)", f).captures[1])
+        α = let _match = match(r"α=([^._]+)", f)
+            !isnothing(_match) ? parse(Int, _match.captures[1]) : θ
         end
 
         frequencies, eigenvalues =
@@ -893,20 +903,23 @@ function plot_focused_eels(;
         if !isnothing(σ)
             loss = hcat([smoothen(loss[:, i]; σ = σ) for i in 1:size(loss, 2)]...)
         end
+        if α == 1
+            loss .+= 0.2
+        end
         plot!(
             p,
             frequencies,
             loss,
             width = 2,
             color = i,
-            label = raw"$\alpha = " * string(α) * raw"\degree$",
+            label = raw"$\alpha = " * string(α) * raw"\degree,\;\theta = " * string(θ) * raw"\degree$",
         )
     end
-    vline!([0.9775],
+    vline!([0.9775 0.795],
         label = "",
         lw = 4,
-        color = :black,
-        alpha = 0.5,
+        color = [1 4],
+        alpha = 0.8,
         linestyle = :dot)
     if !isnothing(output)
         savefig(p, output)
