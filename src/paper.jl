@@ -359,7 +359,7 @@ function plot_coulomb_model(;
     g
 end
 
-function _plot_eels_part(k::Integer; σ::Union{Real, Nothing} = 7)
+function _plot_eels_part(k::Integer; σ::Union{Real, Nothing} = 7, annotation = "(c)")
     matches =
         glob("loss_k=$(k)_μ=1.34_θ=0*.h5", joinpath(paper_folder, "analysis.doping_1.34"))
     length(matches) > 1 && @error "More than one match found:" matches
@@ -380,9 +380,10 @@ function _plot_eels_part(k::Integer; σ::Union{Real, Nothing} = 7)
     end
 
     xticks = Dict(6 => [0, 20, 40], 8 => [0, 20, 40], 10 => [0, 20, 40], 18 => [0, 30, 60])
-    xlims = Dict(6 => (-5, 55), 8 => (-5, 55), 10 => (-5, 55), 18 => (-5, 75))
+    xlims = Dict(6 => (-5, 50), 8 => (-5, 50), 10 => (-5, 45), 18 => (-5, 75))
     g = plot(
         xlabel = raw"$-\mathrm{Im}[1/\varepsilon_1(\omega)]$",
+        xtick_direction = :out,
         xticks = xticks[k],
         xlims = xlims[k],
         fontfamily = "computer modern",
@@ -392,25 +393,26 @@ function _plot_eels_part(k::Integer; σ::Union{Real, Nothing} = 7)
         ylims = (0, 2.5),
         size = (200, 400),
         dpi = 150,
+        left_margin = -5pt,
     )
-    plot!(g, loss[:, 1], ωs, lw = 2, label = "")
+    plot!(g, loss[:, 1], ωs, lw = 2, color = 3, label = "")
     plot!(
         g,
-        [0, 200],
+        [-4, 200],
         [
-            0.63 0.9775 1.195 1.65
-            0.63 0.9775 1.195 1.65
+            0.3235 0.63 0.9775 1.195 1.65
+            0.3235 0.63 0.9775 1.195 1.65
         ],
         label = "",
-        lw = 2,
-        color = :black,
-        alpha = 0.5,
+        lw = 3,
+        palette = :Set2_8,
+        color = [8 4 5 4 5],
         linestyle = :dot,
     )
-    annotate!(g, [(20.0, 2.3, Plots.text("(b)", :center, "computer modern"))])
+    annotate!(g, [(20.0, 2.3, Plots.text(annotation, :center, "computer modern"))])
     g
 end
-function _plot_dispersion_part(k::Integer, variable::Symbol = :ε)
+function _plot_dispersion_part(k::Integer; variable::Symbol = :ε, annotation = "(a)")
     matches = glob(
         "dispersion_k=$(k)_μ=1.34_θ=0*.h5",
         joinpath(paper_folder, "analysis.doping_1.34"),
@@ -420,18 +422,19 @@ function _plot_dispersion_part(k::Integer, variable::Symbol = :ε)
     filename = matches[1]
     @assert variable == :ε || variable == :χ
     ωs = h5open(io -> read(io, "ω"), filename, "r")
-    iₘₐₓ = findfirst(ω -> ω >= 3, ωs)
+    iₘᵢₙ = findfirst(ω -> ω > 0.005, ωs)
+    iₘₐₓ = findlast(ω -> ω < 2.495, ωs)
     if isnothing(iₘₐₓ)
         iₘₐₓ = length(ωs)
     end
     A = h5open(io -> io[string(variable)][1:iₘₐₓ, :, :, :], filename, "r")
     qs = k == 18 ? (0:(0.3 / (size(A, 2) - 1)):0.3) : (0:(1 / (size(A, 2) - 1)):1)
     jₘᵢₙ = findfirst(q -> q > 7e-4, qs)
-    jₘₐₓ = findfirst(q -> q >= 0.25, qs)
+    jₘₐₓ = findfirst(q -> q >= 0.2, qs)
 
-    ωs = ωs[3:iₘₐₓ]
+    ωs = ωs[iₘᵢₙ:iₘₐₓ]
     qs = collect(qs[jₘᵢₙ:(jₘₐₓ - 2)])
-    A = A[3:end, jₘᵢₙ:(jₘₐₓ - 2), :, :]
+    A = A[iₘᵢₙ:end, jₘᵢₙ:(jₘₐₓ - 2), :, :]
 
     function preprocess(M)
         eigenvalues = eigvals(M)
@@ -460,7 +463,7 @@ function _plot_dispersion_part(k::Integer, variable::Symbol = :ε)
         framestyle = :box,
         grid = false,
         colorbar = false,
-        xlims = (0, 0.25 * norm(K .- Γ) / 1.424919),
+        xlims = (0, 0.2 * norm(K .- Γ) / 1.424919),
         ylims = (0, 2.5),
         clims = variable == :ε ? εclims[k] : (0, 0.4),
         xlabel = raw"$q\,,\;\AA^{-1}$",
@@ -469,23 +472,40 @@ function _plot_dispersion_part(k::Integer, variable::Symbol = :ε)
         title = variable == :ε ? raw"$-\mathrm{Im}[1/\varepsilon(\omega, q)]$" :
                 raw"$-\mathrm{Im}[\Pi(\omega, q)]$",
         fontfamily = "computer modern",
-        size = (400, 400),
+        right_margin = -5pt,
+        size = (300, 400),
         dpi = 150,
     )
-    plot!(
-        p,
-        [0, 0.5],
-        [
-            0.63 0.9775 1.195 1.65
-            0.63 0.9775 1.195 1.65
-        ],
-        label = "",
-        lw = 2,
-        color = :black,
-        alpha = 0.5,
-        linestyle = :dot,
-    )
-    annotate!(p, [(0.05, 2.3, Plots.text("(a)", :center, "computer modern"))])
+    if k == 10
+        plot!(p, ylabel = "", yticks = ([], []), left_margin = 15pt)
+        plot!(
+            p,
+            [
+                0.01 0.045 0.12 0.045 0.12
+                0.01 0.045 0.12 0.045 0.12
+                0.5 0.5 0.5 0.5 0.5
+            ],
+            [
+                0.0 0.0 0.0 0.0 0.0
+                0.3225 0.63 0.9775 1.195 1.65
+                0.3225 0.63 0.9775 1.195 1.65
+            ],
+            label = "",
+            lw = 3,
+            palette = :Set2_8,
+            color = [8 4 5 4 5], #:black,
+            # alpha = 0.5,
+            linestyle = :dot,
+        )
+        annotate!(p,
+              [ (0.27, 0.01 + 0.3225, Plots.text("Fig. 6(a)", :bottom, "computer modern", 8)),
+                (0.27, 0.01 + 0.63, Plots.text("Fig. 6(c)", :bottom, "computer modern", 8)),
+                (0.27, 0.01 + 0.9775, Plots.text("Fig. 6(e)", :bottom, "computer modern", 8)),
+                (0.27, 0.01 + 1.195, Plots.text("Fig. 6(b)", :bottom, "computer modern", 8)),
+                (0.27, 0.01 + 1.65, Plots.text("Fig. 6(d)", :bottom, "computer modern", 8)),
+              ])
+    end
+    annotate!(p, [(0.05, 2.3, Plots.text(annotation, :center, "computer modern"))])
     p
 end
 function plot_dispersion_and_eels(
@@ -508,6 +528,30 @@ function plot_dispersion_and_eels(
     end
     g
 end
+
+function figure_3_base(
+    output::Union{AbstractString, Nothing} = joinpath(
+        paper_folder,
+        "plots",
+        "Figure_3.pdf",
+    ),
+)
+    g = plot(
+        _plot_dispersion_part(18, annotation = "(a)"),
+        _plot_dispersion_part(10, annotation = "(b)"),
+        _plot_eels_part(10, annotation = "(c)"),
+        size = (250 + 250 + 140, 320),
+        layout = grid(1, 3, widths = [250 / 640, 250 / 640, 140 / 640]),
+        bottom_margin = 5pt,
+        dpi = 200,
+    )
+    if !isnothing(output)
+        savefig(g, output)
+    end
+    g
+end
+
+
 
 function _extract_eigenmode(ω::Real, filename::AbstractString)
     h5open(filename, "r") do io
@@ -596,6 +640,7 @@ end
 function plot_one_eigenmode(ω::Real, θ::Real, lattice; type = nothing, U = nothing)
     table = Dict(
         0 => [
+              (0, 22, "paper/analysis.doping_1.34/loss_k=10_μ=1.34_θ=0.h5"),
             (
                 1.63,
                 1.67,
@@ -912,15 +957,14 @@ function plot_focused_eels(;
             loss,
             width = 2,
             color = i,
-            label = raw"$\alpha = " * string(α) * raw"\degree,\;\theta = " * string(θ) * raw"\degree$",
+            label = raw"$\alpha = " *
+                    string(α) *
+                    raw"\degree,\;\theta = " *
+                    string(θ) *
+                    raw"\degree$",
         )
     end
-    vline!([0.9775 0.795],
-        label = "",
-        lw = 4,
-        color = [1 4],
-        alpha = 0.8,
-        linestyle = :dot)
+    vline!([0.9775 0.795], label = "", lw = 4, color = [1 4], alpha = 0.8, linestyle = :dot)
     if !isnothing(output)
         savefig(p, output)
     end
