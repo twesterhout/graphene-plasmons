@@ -297,10 +297,10 @@ function _make_edges_plottable(sites, edges)
 end
 
 function center_site_index(sites::Lattice)
-    x = sum(map(i->i.position[1], sites)) / length(sites)
-    y = sum(map(i->i.position[2], sites)) / length(sites)
-    sites = filter(i->i.position[3] ≈ 0, sites)
-    return argmin(map(i->norm((x, y) .- i.position[1:2]), sites))
+    sites = filter(i -> iszero(i.position[3]), sites)
+    origin = (1 / length(sites)) .* reduce(.+, (i.position for i in sites))
+    origin = origin .+ graphene_δrs[2]
+    return findfirst(i -> isapprox(norm(i.position .- origin), 0, atol = 1e-7), sites)
 end
 
 """
@@ -358,6 +358,48 @@ function plot_lattice(sites::Lattice; sublattices::Bool = true, kwargs...)
         color = :red,
     )
     p
+end
+function plot_lattice_v2(sites::Lattice; kwargs...)
+    layers = []
+    push!(layers, filter(i -> iszero(i.position[3]), sites))
+    if length(layers[1]) != length(sites)
+        push!(layers, filter(i -> !iszero(i.position[3]), sites))
+    end
+    @assert sum(map(l -> length(l), layers)) == length(sites)
+    edges = [nearest_neighbours(l) for l in layers]
+
+    function limits(axis::Int)
+        (m, M) = extrema((i.position[axis] for i in sites))
+        return (m - 1.0, M + 1.0)
+    end
+
+    p = plot(
+        xlims = limits(1),
+        ylims = limits(2),
+        palette = :Set2_8,
+        axis = ([], false),
+        aspect_ratio = 1,
+    )
+    for (i, (sites, edges)) in enumerate(zip(layers, edges))
+        plot!(
+            p,
+            _make_edges_plottable(sites, edges)...,
+            linewidth = 2,
+            linecolor = i + 1,
+            label = "",
+        )
+        scatter!(
+            p,
+            map(i -> i.position[1], sites),
+            map(i -> i.position[2], sites),
+            markerstrokewidth = 0,
+            color = i + 1,
+            markerstrokecolor = i + 1,
+            label = "";
+            kwargs...,
+        )
+    end
+    return p
 end
 
 function plot_example_zigzag_samples()
@@ -426,6 +468,12 @@ function plot_our_sample()
     plot(plotone(10, 10, title = raw"$\theta=10\degree$"), size = (800, 700), dpi = 150)
 end
 plot_our_sample(output::AbstractString) = savefig(plot_our_sample(), output)
+
+function plot_our_sample_v2()
+    plotone(k, θ; kwargs...) =
+        plot_lattice_v2(armchair_bilayer_hexagon(k, rotate = θ); kwargs...)
+    plot(plotone(10, 10), size = (800, 700), dpi = 150)
+end
 
 # function slater_koster_prb_86_125413(
 #     rᵢⱼ::NTuple{3, Float64};
