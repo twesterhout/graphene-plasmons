@@ -740,6 +740,7 @@ function plot_eigenvector_bilayer(
     ω::Union{<:Real, Nothing} = nothing,
     title::Union{<:AbstractString, Nothing} = nothing,
     type::Union{<:AbstractString, Nothing} = nothing,
+    annotation::Union{<:AbstractString, Nothing} = nothing,
     colorbar = true,
     limit::Union{<:Real, Nothing} = nothing,
     kwargs...,
@@ -777,6 +778,13 @@ function plot_eigenvector_bilayer(
         # color = color,
         kwargs...,
     )
+    if !isnothing(annotation)
+        x = xlims[1] - 2
+        y = ylims[2]
+        annotate!(p₂,
+            [(x, y, Plots.text(annotation, 40, :black, :center, "computer modern"))]
+        )
+    end
     plot(
         p₁,
         p₂,

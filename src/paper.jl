@@ -497,13 +497,28 @@ function _plot_dispersion_part(k::Integer; variable::Symbol = :ε, annotation = 
             # alpha = 0.5,
             linestyle = :dot,
         )
-        annotate!(p,
-              [ (0.27, 0.01 + 0.3225, Plots.text("Fig. 6(a)", :bottom, "computer modern", 8)),
+        annotate!(
+            p,
+            [
+                (
+                    0.27,
+                    0.01 + 0.3225,
+                    Plots.text("Fig. 6(a)", :bottom, "computer modern", 8),
+                ),
                 (0.27, 0.01 + 0.63, Plots.text("Fig. 6(c)", :bottom, "computer modern", 8)),
-                (0.27, 0.01 + 0.9775, Plots.text("Fig. 6(e)", :bottom, "computer modern", 8)),
-                (0.27, 0.01 + 1.195, Plots.text("Fig. 6(b)", :bottom, "computer modern", 8)),
+                (
+                    0.27,
+                    0.01 + 0.9775,
+                    Plots.text("Fig. 6(e)", :bottom, "computer modern", 8),
+                ),
+                (
+                    0.27,
+                    0.01 + 1.195,
+                    Plots.text("Fig. 6(b)", :bottom, "computer modern", 8),
+                ),
                 (0.27, 0.01 + 1.65, Plots.text("Fig. 6(d)", :bottom, "computer modern", 8)),
-              ])
+            ],
+        )
     end
     annotate!(p, [(0.05, 2.3, Plots.text(annotation, :center, "computer modern"))])
     p
@@ -568,7 +583,7 @@ function plot_non_twisted_eigenmodes(;
     output::Union{AbstractString, Nothing} = joinpath(
         paper_folder,
         "plots",
-        "non_twisted_eigenmodes.png",
+        "Figure_6.png",
     ),
 )
     k = 10 # parse(Int, match(r"k=([^._]+)", filename).captures[1])
@@ -576,25 +591,26 @@ function plot_non_twisted_eigenmodes(;
     lattice = armchair_bilayer_hexagon(k; rotate = θ)
 
     table = [
-        (1.63, 1.67, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0_1.63_1.67.h5"),
-        (0.0, 1.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0_0.0_1.0.h5"),
-        (1.0, 2.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0_1.0_2.0.h5"),
-        (0.0, 22.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0.h5"),
+        (1.63, 1.67, "remote/Figure_6/loss_3252_θ=0_1.63_1.67.h5"),
+        (0.0, 1.0, "remote/Figure_6/loss_3252_θ=0_0.0_1.0.h5"),
+        (1.0, 2.0, "remote/Figure_6/loss_3252_θ=0_1.0_2.0.h5"),
+        # (0.0, 22.0, "remote/Figure_6/loss_3252_θ=0.h5"),
     ]
 
-    function picture(ω; type = nothing)
+    function picture(ω; annotation = nothing, type = nothing)
         i = findfirst(t -> t[1] <= ω && ω <= t[2], table)
         filename = table[i][3]
         p = plot_eigenvector_bilayer(
             lattice,
             _extract_eigenmode(ω, filename)[1],
             ω = ω,
-            titlefontsize = 24,
+            titlefontsize = 18,
             colorbar = false,
             type = type,
+            annotation = annotation,
             left_margin = 0mm,
             right_margin = 0mm,
-            markersize = 4.4,
+            # markersize = 4.4,
             markerstrokewidth = 0,
             # color = cgrad(:bwr),
         )
@@ -607,29 +623,48 @@ function plot_non_twisted_eigenmodes(;
     annotate!(
         header,
         [
-            (x, 1.0, Plots.text(t, 24, :top, "computer modern"))
+            (x, 1.05, Plots.text(t, 24, :top, "computer modern"))
             for (x, t) in [(0.1405, raw"bottom\nlayer"), (0.3765, raw"top\nlayer")]
         ],
     )
+    # g = plot(
+    #     header,
+    #     none,
+    #     none,
+    #     picture(0.3225, type = "layer-polarized"),
+    #     picture(0.3225, type = "layer-polarized"),
+    #     picture(0.3225, type = "layer-polarized"),
+    #     none,
+    #     none,
+    #     none,
+    #     picture(0.3225, type = "layer-polarized"),
+    #     picture(0.3225, type = "layer-polarized"),
+    #     picture(0.3225, type = "layer-polarized"),
+    #     layout = (@layout [header{0.1h}; [_{0.02w} [°; °; °; °] _{0.04w} [°; °; °; °]]]),
+    #     size = (2 * 720 * 1.06, 4 * 360 * 1.1),
+    #     dpi = 80,
+    #     # dpi = 150,
+    # )
     g = plot(
-        header,
         # Separator
         none,
         # First column
-        picture(0.3225, type = "layer-polarized"),
-        picture(1.195, type = "dipole"),
-        picture(1.65, type = "1s"),
+        none,
+        picture(1.195, type = "dipole", annotation = "(b)"),
+        picture(1.65, type = raw"$1s$", annotation = "(d)"),
         none,
         # Separator
         none,
         # Second column
-        none,
-        picture(0.63),
-        picture(0.9775),
-        picture(1.265),
-        layout = (@layout [header{0.1h} [_{0.02w} [°; °; °; °] _{0.04w} [°; °; °; °]]]),
-        size = (2 * 720 * 1.06, 4 * 360 * 1.1),
-        # dpi = 80
+        picture(0.3225, type = "layer-polarized", annotation = "(a)"),
+        picture(0.63, annotation = "(c)"),
+        picture(0.9775, annotation = "(e)"),
+        picture(1.265, type = raw"$1p$", annotation = "(f)"),
+        header,
+        layout = (@layout [[_{0.02w} [°; °; °; °] _{0.04w} [°; °; °; °]] header{0.05h}]),
+        size = (2 * 600 * 1.06, 4 * 300 * 1.07),
+        bottom_margin = 15pt,
+        dpi = 150,
     )
     if !isnothing(output)
         savefig(g, output)
@@ -640,137 +675,51 @@ end
 function plot_one_eigenmode(ω::Real, θ::Real, lattice; type = nothing, U = nothing)
     table = Dict(
         0 => [
-              (0, 22, "paper/analysis.doping_1.34/loss_k=10_μ=1.34_θ=0.h5"),
-            (
-                1.63,
-                1.67,
-                "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0_1.63_1.67.h5",
-            ),
-            (0.0, 1.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0_0.0_1.0.h5"),
-            (1.0, 2.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0_1.0_2.0.h5"),
-            (0.0, 22.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=0.h5"),
+            (1.63, 1.67, "remote/Figure_7/loss_3252_θ=0_1.63_1.67.h5"),
+            (0.0, 1.0, "remote/Figure_7/loss_3252_θ=0_0.0_1.0.h5"),
+            (1.0, 2.0, "remote/Figure_7/loss_3252_θ=0_1.0_2.0.h5"),
+            (0.0, 22.0, "remote/Figure_7/loss_3252_θ=0.h5"),
         ],
         10 => [
-            (
-                1.63,
-                1.67,
-                "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=10_1.63_1.67.h5",
-            ),
-            (
-                0.0,
-                1.0,
-                "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=10_0.0_1.0.h5",
-            ),
-            (
-                1.0,
-                2.0,
-                "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=10_1.0_2.0.h5",
-            ),
-            (0.0, 22.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=10.h5"),
+            (1.63, 1.67, "remote/Figure_7/loss_3252_θ=10_1.63_1.67.h5"),
+            (0.0, 1.0, "remote/Figure_7/loss_3252_θ=10_0.0_1.0.h5"),
+            (1.0, 2.0, "remote/Figure_7/loss_3252_θ=10_1.0_2.0.h5"),
+            (0.0, 22.0, "remote/Figure_7/loss_3252_θ=10.h5"),
         ],
         20 => [
-            (
-                1.63,
-                1.67,
-                "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=20_1.63_1.67.h5",
-            ),
-            (
-                0.8,
-                1.0,
-                "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=20_0.8_1.0.h5",
-            ),
-            (
-                0.0,
-                1.0,
-                "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=20_0.0_1.0.h5",
-            ),
-            (0.0, 22.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=20.h5"),
+            (1.63, 1.67, "remote/Figure_7/loss_3252_θ=20_1.63_1.67.h5"),
+            (0.8, 1.0, "remote/Figure_7/loss_3252_θ=20_0.8_1.0.h5"),
+            (0.0, 1.0, "remote/Figure_7/loss_3252_θ=20_0.0_1.0.h5"),
+            (0.0, 22.0, "remote/Figure_7/loss_3252_θ=20.h5"),
         ],
         30 => [
-            (
-                1.63,
-                1.67,
-                "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=30_1.63_1.67.h5",
-            ),
-            (
-                0.84,
-                0.88,
-                "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=30_0.84_0.88.h5",
-            ),
-            (
-                0.0,
-                1.0,
-                "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=30_0.0_1.0.h5",
-            ),
-            (
-                1.0,
-                2.0,
-                "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=30_1.0_2.0.h5",
-            ),
-            (0.0, 22.0, "../graphene-plasmons-backup/data/bilayer/loss_3252_θ=30.h5"),
+            (1.63, 1.67, "remote/Figure_7/loss_3252_θ=30_1.63_1.67.h5"),
+            (0.84, 0.88, "remote/Figure_7/loss_3252_θ=30_0.84_0.88.h5"),
+            (0.0, 1.0, "remote/Figure_7/loss_3252_θ=30_0.0_1.0.h5"),
+            (1.0, 2.0, "remote/Figure_7/loss_3252_θ=30_1.0_2.0.h5"),
+            (0.0, 22.0, "remote/Figure_7/loss_3252_θ=30.h5"),
         ],
     )
 
     i = findfirst(t -> t[1] <= ω && ω <= t[2], table[θ])
     filename = table[θ][i][3]
-    # lattice = armchair_bilayer_hexagon(10; rotate = θ)
-    # U = bilayer_graphene_coulomb_model(lattice)
     eigenvector, density = _extract_eigenmode(ω, filename)
-    p₁ = plot_eigenvector_bilayer(
+    return plot_eigenvector_bilayer(
         lattice,
         eigenvector,
         ω = ω,
-        titlefontsize = 24,
+        titlefontsize = 18,
         colorbar = false,
         type = type,
         left_margin = 0mm,
         right_margin = 0mm,
-        markersize = 4.3,
+        # markersize = 4.3,
         markerstrokewidth = 0,
-        # color = cgrad(:bwr),
-    )
-    if isnothing(U)
-        return plot(p₁, size = (720, 360))
-    end
-    p₂ = plot_eigenvector_bilayer(
-        lattice,
-        U * real(eigenvector),
-        title = raw"$\langle\phi_1(\omega)|U$",
-        titlefontsize = 16,
-        colorbar = false,
-        left_margin = 0mm,
-        right_margin = 0mm,
-        markersize = 2.2,
-        markerstrokewidth = 0,
-        # color = cgrad(:bwr),
-    )
-    p₃ = plot_eigenvector_bilayer(
-        lattice,
-        real(density),
-        title = raw"$\Pi(\omega)|\phi_1(\omega)\rangle$",
-        titlefontsize = 16,
-        colorbar = false,
-        left_margin = 0mm,
-        right_margin = 0mm,
-        markersize = 2.1,
-        markerstrokewidth = 0,
-        # color = cgrad(:bwr),
-    )
-    none = plot(ticks = false, border = false, showaxis = false)
-    plot(
-        p₁,
-        none,
-        p₃,
-        layout = (@layout [°{0.66h}; [° °]]),
-        size = (720, 360 + 120),
-        # dpi = 150,
+        size = (600, 300),
     )
 end
-function plot_twisted_eigenmodes(
-    θ::Real;
-    k::Integer = 10,
-    output::Union{AbstractString, Nothing} = joinpath(paper_folder, "plots"),
-)
+function plot_twisted_eigenmodes(θ::Real)
+    k = 10
     ωs = Dict(
         0 => (0.63, 1.195, 0.9775, 1.65),
         10 => (0.405, 1.205, 0.795, 1.663),
@@ -778,17 +727,7 @@ function plot_twisted_eigenmodes(
         30 => (0.425, 1.1925, 0.8566, 1.695),
     )
     lattice = armchair_bilayer_hexagon(k; rotate = θ)
-    U = nothing # θ == 0 || θ == 30 ? bilayer_graphene_coulomb_model(lattice) : nothing
-
     none = plot(ticks = false, border = false, showaxis = false)
-    header = plot(xlims = (0, 2), ylims = (0, 1), ticks = false, showaxis = false)
-    annotate!(
-        header,
-        [
-            (x, 1.0, Plots.text(t, 24, :top, "computer modern"))
-            for (x, t) in [(0.147, raw"bottom\nlayer"), (0.394, raw"top\nlayer")]
-        ],
-    )
     plots = [
         none,
         plot_one_eigenmode(
@@ -796,35 +735,55 @@ function plot_twisted_eigenmodes(
             θ,
             lattice,
             type = raw"$" * string(θ) * raw"\degree$",
-            U = U,
         ),
-        plot_one_eigenmode(ωs[θ][2], θ, lattice, U = U),
+        plot_one_eigenmode(ωs[θ][2], θ, lattice),
         none,
-        plot_one_eigenmode(ωs[θ][3], θ, lattice, U = U),
-        plot_one_eigenmode(ωs[θ][4], θ, lattice, U = U),
+        plot_one_eigenmode(ωs[θ][3], θ, lattice),
+        plot_one_eigenmode(ωs[θ][4], θ, lattice),
     ]
-    if θ == 0
-        plots = (header, plots...)
-    end
-    plot_layout =
-        θ == 0 ? (@layout [°{0.3h}; [°{0.01w} ° ° °{0.02w} ° °]]) :
-        (@layout [°{0.01w} ° ° °{0.02w} ° °])
-    plot_size = (4 * 720, 1 * 360)
-    if θ == 0
-        plot_size = (4 * 720, 1 * 400 * 1.3)
-        #     plot_size = (4 * 720, 1 * 600 * 1.2)
-        # elseif θ == 30
-        #     plot_size = (4 * 720, 1 * 600)
-    end
-    g = plot(
+    return plot(
         plots...,
-        layout = plot_layout,
-        size = plot_size,
+        layout = (@layout [°{0.01w} ° ° °{0.02w} ° °]),
+        size = (4 * 600, 1 * 300),
         dpi = 150,
-        # dpi = 80
+    )
+end
+function plot_twisted_eigenmodes(;
+    output::Union{AbstractString, Nothing} = joinpath(
+        paper_folder,
+        "plots",
+        "Figure_7.png",
+    ),
+)
+    header = plot(xlims = (0, 2), ylims = (0, 1), ticks = false, showaxis = false)
+    annotate!(
+        header,
+        [
+            (x, 1.0, Plots.text(t, 40, :top, "computer modern"))
+            for (x, t) in [(0.268, "(a)"), (0.75, raw"(b)"), (1.285, "(c)"), (1.770, "(d)")]
+        ],
+    )
+    footer = plot(xlims = (0, 2), ylims = (0, 1), ticks = false, showaxis = false)
+    annotate!(
+        footer,
+        [
+            (x, 1.0, Plots.text(t, 24, :top, "computer modern"))
+            for (x, t) in [(0.147, raw"bottom\nlayer"), (0.394, raw"top\nlayer")]
+        ],
+    )
+    g = plot(
+        header,
+        plot_twisted_eigenmodes(0),
+        plot_twisted_eigenmodes(10),
+        plot_twisted_eigenmodes(20),
+        plot_twisted_eigenmodes(30),
+        footer,
+        layout = (@layout [°{0.05h}; °; °; °; °; °{0.1h}]),
+        size = (4 * 600, 4 * 300 * 1.15),
+        dpi = 150,
     )
     if !isnothing(output)
-        savefig(g, joinpath(output, "twisted_eigenmodes_θ=$(θ).png"))
+        savefig(g, output)
     end
     g
 end
