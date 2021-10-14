@@ -360,8 +360,7 @@ function plot_coulomb_model(;
 end
 
 function _plot_eels_part(k::Integer; σ::Union{Real, Nothing} = 7, annotation = "(c)")
-    matches =
-        glob("loss_k=$(k)_μ=1.34_θ=0*.h5", joinpath(paper_folder, "analysis.doping_1.34"))
+    matches = glob("loss_k=$(k)_μ=1.34_θ=0*.h5", joinpath("remote", "Figure_5"))
     length(matches) > 1 && @error "More than one match found:" matches
     isempty(matches) && @error "No matches found"
     filename = matches[1]
@@ -415,7 +414,7 @@ end
 function _plot_dispersion_part(k::Integer; variable::Symbol = :ε, annotation = "(a)")
     matches = glob(
         "dispersion_k=$(k)_μ=1.34_θ=0*.h5",
-        joinpath(paper_folder, "analysis.doping_1.34"),
+        joinpath("remote", "Figure_5"),
     )
     length(matches) > 1 && @error "More than one match found:" matches
     isempty(matches) && @error "No matches found"
@@ -544,11 +543,11 @@ function plot_dispersion_and_eels(
     g
 end
 
-function figure_3_base(
+function figure_5(
     output::Union{AbstractString, Nothing} = joinpath(
         paper_folder,
         "plots",
-        "Figure_3.pdf",
+        "Figure_5.png",
     ),
 )
     g = plot(
@@ -568,7 +567,7 @@ end
 
 
 
-function _extract_eigenmode(ω::Real, filename::AbstractString)
+function _extract_eigenmode(ω::Real, filename::AbstractString; flip::Bool = false)
     h5open(filename, "r") do io
         ωs = read(io, "frequencies")
         i = findfirst(x -> real(x) == ω, ωs)
@@ -576,7 +575,11 @@ function _extract_eigenmode(ω::Real, filename::AbstractString)
             throw(ArgumentError("ω = $ω not found in $filename"))
         end
         load(d) = ndims(d) == 2 ? d[:, i] : d[:, 1, i]
-        load(io["eigenvectors"]), load(io["densities"])
+        v = load(io["eigenvectors"])
+        if flip
+            v = -v
+        end
+        return v
     end
 end
 function plot_non_twisted_eigenmodes(;
@@ -602,7 +605,7 @@ function plot_non_twisted_eigenmodes(;
         filename = table[i][3]
         p = plot_eigenvector_bilayer(
             lattice,
-            _extract_eigenmode(ω, filename)[1],
+            _extract_eigenmode(ω, filename),
             ω = ω,
             titlefontsize = 18,
             colorbar = false,
@@ -672,7 +675,7 @@ function plot_non_twisted_eigenmodes(;
     g
 end
 
-function plot_one_eigenmode(ω::Real, θ::Real, lattice; type = nothing, U = nothing)
+function plot_one_eigenmode(ω::Real, c::Real, θ::Real, lattice; type = nothing)
     table = Dict(
         0 => [
             (1.63, 1.67, "remote/Figure_7/loss_3252_θ=0_1.63_1.67.h5"),
@@ -703,7 +706,7 @@ function plot_one_eigenmode(ω::Real, θ::Real, lattice; type = nothing, U = not
 
     i = findfirst(t -> t[1] <= ω && ω <= t[2], table[θ])
     filename = table[θ][i][3]
-    eigenvector, density = _extract_eigenmode(ω, filename)
+    eigenvector = c .* _extract_eigenmode(ω, filename)
     return plot_eigenvector_bilayer(
         lattice,
         eigenvector,
@@ -720,26 +723,27 @@ function plot_one_eigenmode(ω::Real, θ::Real, lattice; type = nothing, U = not
 end
 function plot_twisted_eigenmodes(θ::Real)
     k = 10
-    ωs = Dict(
-        0 => (0.63, 1.195, 0.9775, 1.65),
-        10 => (0.405, 1.205, 0.795, 1.663),
-        20 => (0.42, 1.2, 0.815, 1.667),
-        30 => (0.425, 1.1925, 0.8566, 1.695),
-    )
+    args = Dict(
+        0 => [(0.63, 1), (1.195, 1), (0.9775, 1), (1.65, 1)],
+        10 => [(0.405, 1), (1.205, -1), (0.795, 1), (1.663, 1)],
+        20 => [(0.42, -1), (1.2, -1), (0.815, 1), (1.667, 1)],
+        30 => [(0.425, 1), (1.1925, 1), (0.8566, -1), (1.695, 1)],
+    )[θ]
     lattice = armchair_bilayer_hexagon(k; rotate = θ)
     none = plot(ticks = false, border = false, showaxis = false)
+
     plots = [
         none,
         plot_one_eigenmode(
-            ωs[θ][1],
+            args[1]...,
             θ,
             lattice,
             type = raw"$" * string(θ) * raw"\degree$",
         ),
-        plot_one_eigenmode(ωs[θ][2], θ, lattice),
+        plot_one_eigenmode(args[2]..., θ, lattice),
         none,
-        plot_one_eigenmode(ωs[θ][3], θ, lattice),
-        plot_one_eigenmode(ωs[θ][4], θ, lattice),
+        plot_one_eigenmode(args[3]..., θ, lattice),
+        plot_one_eigenmode(args[4]..., θ, lattice),
     ]
     return plot(
         plots...,
@@ -760,7 +764,8 @@ function plot_twisted_eigenmodes(;
         header,
         [
             (x, 1.0, Plots.text(t, 40, :top, "computer modern"))
-            for (x, t) in [(0.268, "(a)"), (0.75, raw"(b)"), (1.285, "(c)"), (1.770, "(d)")]
+            for
+            (x, t) in [(0.268, "(a)"), (0.75, raw"(b)"), (1.285, "(c)"), (1.770, "(d)")]
         ],
     )
     footer = plot(xlims = (0, 2), ylims = (0, 1), ticks = false, showaxis = false)
@@ -785,7 +790,7 @@ function plot_twisted_eigenmodes(;
     if !isnothing(output)
         savefig(g, output)
     end
-    g
+    nothing # g
 end
 
 function plot_pretty_eels(;
@@ -934,7 +939,7 @@ function plot_non_twisted_eigenmodes_appendix(;
     output::Union{AbstractString, Nothing} = joinpath(
         paper_folder,
         "plots",
-        "non_twisted_eigenmodes_small_doping.png",
+        "Figure_9.png",
     ),
 )
     k = 10 # parse(Int, match(r"k=([^._]+)", filename).captures[1])
@@ -942,17 +947,18 @@ function plot_non_twisted_eigenmodes_appendix(;
     lattice = armchair_bilayer_hexagon(k; rotate = θ)
 
     function picture(ω; type = nothing, kwargs...)
-        filename = joinpath(paper_folder, "analysis", "combined_loss_k=10_θ=0.h5")
+        # filename = joinpath(paper_folder, "analysis", "combined_loss_k=10_θ=0.h5")
+        filename = "loss_k=10_μ=0_θ=0.h5"
         p = plot_eigenvector_bilayer(
             lattice,
-            _extract_eigenmode(ω, filename)[1],
+            _extract_eigenmode(ω, filename),
             ω = ω,
-            titlefontsize = 24,
+            titlefontsize = 18,
             colorbar = false,
             type = type,
             left_margin = 0mm,
             right_margin = 0mm,
-            markersize = 4.4,
+            # markersize = 4.4,
             markerstrokewidth = 0;
             # color = cgrad(:bwr),
             kwargs...,
@@ -978,7 +984,7 @@ function plot_non_twisted_eigenmodes_appendix(;
         picture(0.303, type = "layer-polarized"),
         picture(0.5678, type = "dipole"),
         picture(0.5946),
-        picture(0.7349, type = "1s"),
+        picture(0.7349, type = raw"$1s$"),
         # Separator
         none,
         # Second column
@@ -986,8 +992,8 @@ function plot_non_twisted_eigenmodes_appendix(;
         picture(0.215, alpha = 0.5),
         none,
         picture(0.2493, alpha = 0.5),
-        layout = (@layout [header{0.1h} [_{0.02w} [°; °; °; °] _{0.04w} [°; °; °; °]]]),
-        size = (2 * 720 * 1.06, 4 * 360 * 1.1),
+        layout = (@layout [header{0.1h}; [_{0.02w} [°; °; °; °] _{0.04w} [°; °; °; °]]]),
+        size = (2 * 600 * 1.06, 4 * 300 * 1.1),
         # dpi = 80
     )
     if !isnothing(output)
@@ -1000,7 +1006,7 @@ function plot_excitation_energies(;
     output::Union{AbstractString, Nothing} = joinpath(
         paper_folder,
         "plots",
-        "excitation_energies.pdf",
+        "Figure_8.pdf",
     ),
 )
     θs = [0, 10, 20, 30]
@@ -1014,12 +1020,12 @@ function plot_excitation_energies(;
     g = plot(
         θs,
         table,
-        labels = [raw"bright 1s" raw"bright dipole" raw"dark 1s" raw"dark dipole"],
+        labels = [raw"$\mathrm{bright}\ 1s\ \mathrm{(d)}$" raw"bright dipole (b)" raw"$\mathrm{dark}\ 1s\ \mathrm{(c)}$" raw"dark dipole (a)"],
         markersize = 6,
         markerstrokewidth = 2,
         linestyle = [:solid :solid :dash :dash],
         lw = 2,
-        color = [1 2 1 2],
+        color = [2 3 2 3],
         markershape = [:circle :diamond :circle :diamond],
         xlabel = raw"$\theta\,,\;\degree$",
         ylabel = raw"$\omega\,,\;\mathrm{eV}$",
@@ -1027,7 +1033,7 @@ function plot_excitation_energies(;
         yticks = [0.5, 1.0, 1.5],
         ylims = (0.3, 1.8),
         legend = :outerright,
-        size = (480, 200),
+        size = (400, 160),
         dpi = 150,
         fontfamily = "computer modern",
         bottom_margin = 2mm,

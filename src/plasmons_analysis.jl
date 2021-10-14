@@ -77,6 +77,74 @@ end
 combine_datasets(pattern::AbstractString; kwargs...) =
     combine_datasets(glob(basename(pattern), dirname(pattern)); kwargs...)
 
+
+function _number_of_kept_eigenstates(filename::AbstractString)
+    h5open(filename, "r") do io
+        (n₁, _) = size(io["eigenvalues"])
+        (_, n₂, _) = size(io["eigenvectors"])
+        (_, n₃, _) = size(io["densities"])
+        if n₁ != n₂ || n₁ != n₃
+            throw(ErrorException(
+                "shapes of 'eigenvalues', 'eigenvectors', and 'densities' in '$filename' " *
+                "are inconsistent: $(size(io["eigenvalues"])) vs. $(size(io["eigenvectors"])) " *
+                "vs. $(size(io["densities"]))",
+            ))
+        end
+        return n₁
+    end
+end
+function _make_ranges(filenames::AbstractVector{<:AbstractString})
+    offset = 0
+    ranges = []
+    for f in filenames
+        n = h5open(io -> length(io["frequencies"]), f, "r")
+        push!(ranges, (offset + 1, offset + n))
+        offset += n
+    end
+    function getindex(i::Integer)
+        chunk = findfirst(r -> r[1] <= i && i <= r[2], ranges)
+        return chunk, i - (ranges[chunk][1] - 1)
+    end
+    return getindex
+end
+function merge_loss_files(
+    filenames::AbstractVector{<:AbstractString};
+    output::AbstractString,
+)
+    n = minimum((_number_of_kept_eigenstates(f) for f in filenames))
+    @info "Keeping $n leading eigenstates..."
+    getindex = _make_ranges(filenames)
+
+    files = [h5open(f, "r") for f in filenames]
+    frequencies = cat((read(f, "frequencies") for f in files)...; dims = 1)
+    indices = sortperm(frequencies)
+    indices = unique(i -> frequencies[i], indices)
+
+    systemsize = h5open(io -> size(io["eigenvectors"])[1], filenames[1], "r")
+    @info "System contains $systemsize atoms..."
+
+    frequencies = frequencies[indices]
+    eigenvalues = fill(NaN + NaN * im, (n, length(frequencies)))
+    eigenvectors = fill(NaN + NaN * im, (systemsize, n, length(frequencies)))
+    densities = fill(NaN + NaN * im, (systemsize, n, length(frequencies)))
+
+    for (offset, global_index) in enumerate(indices)
+        (chunk, inner) = getindex(global_index)
+        f = files[chunk]
+        eigenvalues[:, offset] .= f["eigenvalues"][1:n, inner]
+        eigenvectors[:, :, offset] .= f["eigenvectors"][:, 1:n, inner]
+        densities[:, :, offset] .= f["densities"][:, 1:n, inner]
+    end
+    h5open(output, "w") do outfile
+        outfile["frequencies"] = frequencies
+        outfile["eigenvalues"] = eigenvalues
+        outfile["eigenvectors"] = eigenvectors
+        outfile["densities"] = densities
+    end
+    nothing
+end
+
+
 function _dielectric(χ::AbstractMatrix{Complex{ℝ}}, V::AbstractMatrix{ℝ}) where {ℝ <: Real}
     # ℂ = complex(ℝ)
     if size(χ, 1) != size(χ, 2) || size(χ) != size(V)
@@ -114,7 +182,8 @@ function compute_leading_eigenvalues(
             ε = _dielectric(χ, V)
             @info "Computing eigen decomposition of ε..."
             t₀ = time_ns()
-            values, _, vectors = hasmagma() ? magma_geev!('N', _rv, ε) : LAPACK.geev!('N', _rv, ε)
+            values, _, vectors =
+                hasmagma() ? magma_geev!('N', _rv, ε) : LAPACK.geev!('N', _rv, ε)
             t₁ = time_ns()
             @info "Done in $((t₁ - t₀) / 1e9) seconds."
             @info "Computing loss..."
@@ -766,9 +835,14 @@ function plot_eigenvector_bilayer(
     )
     if !isnothing(type)
         x = xlims[1] - 3
-        y = sum(map(i->i.position[2], lattice[mask])) / length(lattice[mask])
-        annotate!(p₁,
-            [(x, y, Plots.text(type, 24, :black, :bottom, "computer modern", rotation = 90))]
+        y = sum(map(i -> i.position[2], lattice[mask])) / length(lattice[mask])
+        annotate!(
+            p₁,
+            [(
+                x,
+                y,
+                Plots.text(type, 24, :black, :bottom, "computer modern", rotation = 90),
+            )],
         )
     end
     p₂ = plot_eigenvector(
@@ -781,8 +855,9 @@ function plot_eigenvector_bilayer(
     if !isnothing(annotation)
         x = xlims[1] - 2
         y = ylims[2]
-        annotate!(p₂,
-            [(x, y, Plots.text(annotation, 40, :black, :center, "computer modern"))]
+        annotate!(
+            p₂,
+            [(x, y, Plots.text(annotation, 40, :black, :center, "computer modern"))],
         )
     end
     plot(
