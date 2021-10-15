@@ -857,7 +857,7 @@ function plot_eigenvector_bilayer(
         y = ylims[2]
         annotate!(
             p₂,
-            [(x, y, Plots.text(annotation, 40, :black, :center, "computer modern"))],
+            [(x, y, Plots.text(annotation, 32, :black, :center, "computer modern"))],
         )
     end
     plot(

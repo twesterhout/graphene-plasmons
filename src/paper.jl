@@ -1,3 +1,5 @@
+using DelimitedFiles
+
 function generate_input_file(k::Integer, θ::Real, filename::AbstractString; shift::Real)
     lattice = armchair_bilayer_hexagon(k, rotate = θ)
     hamiltonian = bilayer_graphene_hamiltonian_from_dft(lattice)
@@ -266,14 +268,14 @@ function _extract_screened_coulomb_interaction(filename::AbstractString)
 end
 function plot_static_polarizability(
     filename::AbstractString = joinpath(
-        paper_folder,
-        "analysis",
+        "remote",
+        "Figure_10",
         "screened_coulomb_interaction_k=10_μ=1.34_θ=0.h5",
     );
     output::Union{AbstractString, Nothing} = joinpath(
         paper_folder,
         "plots",
-        "static_polarizability.png",
+        "Figure_10.png",
     ),
 )
     k = parse(Int, match(r"k=([^._]+)", filename).captures[1])
@@ -288,13 +290,19 @@ function plot_static_polarizability(
             lattice,
             χ,
             title = raw"$\Pi(r, r' = \mathrm{" * location * raw"}, \omega = 0)$",
-            titlefontsize = 24,
+            titlefontsize = 18,
             clims = (-0.0005, 0.0005),
             colorbar = true,
         )
         push!(plots, p)
     end
-    g = plot(plots..., layout = grid(2, 1), size = (960, 960))
+    g = plot(
+        plots...,
+        layout = grid(2, 1),
+        size = (740, 720),
+        right_margin = 10pt,
+        dpi = 150,
+    )
     if !isnothing(output)
         savefig(g, output)
     end
@@ -412,10 +420,7 @@ function _plot_eels_part(k::Integer; σ::Union{Real, Nothing} = 7, annotation = 
     g
 end
 function _plot_dispersion_part(k::Integer; variable::Symbol = :ε, annotation = "(a)")
-    matches = glob(
-        "dispersion_k=$(k)_μ=1.34_θ=0*.h5",
-        joinpath("remote", "Figure_5"),
-    )
+    matches = glob("dispersion_k=$(k)_μ=1.34_θ=0*.h5", joinpath("remote", "Figure_5"))
     length(matches) > 1 && @error "More than one match found:" matches
     isempty(matches) && @error "No matches found"
     filename = matches[1]
@@ -547,7 +552,7 @@ function figure_5(
     output::Union{AbstractString, Nothing} = joinpath(
         paper_folder,
         "plots",
-        "Figure_5.png",
+        "Figure_5.pdf",
     ),
 )
     g = plot(
@@ -607,7 +612,7 @@ function plot_non_twisted_eigenmodes(;
             lattice,
             _extract_eigenmode(ω, filename),
             ω = ω,
-            titlefontsize = 18,
+            titlefontsize = 22,
             colorbar = false,
             type = type,
             annotation = annotation,
@@ -627,7 +632,13 @@ function plot_non_twisted_eigenmodes(;
         header,
         [
             (x, 1.05, Plots.text(t, 24, :top, "computer modern"))
-            for (x, t) in [(0.1405, raw"bottom\nlayer"), (0.3765, raw"top\nlayer")]
+            for
+            (x, t) in [
+                (0.1405, raw"bottom\nlayer"),
+                (0.3765, raw"top\nlayer"),
+                (0.665, raw"bottom\nlayer"),
+                (0.90, raw"top\nlayer"),
+            ]
         ],
     )
     # g = plot(
@@ -649,6 +660,7 @@ function plot_non_twisted_eigenmodes(;
     #     # dpi = 150,
     # )
     g = plot(
+        header,
         # Separator
         none,
         # First column
@@ -663,10 +675,12 @@ function plot_non_twisted_eigenmodes(;
         picture(0.63, annotation = "(c)"),
         picture(0.9775, annotation = "(e)"),
         picture(1.265, type = raw"$1p$", annotation = "(f)"),
-        header,
-        layout = (@layout [[_{0.02w} [°; °; °; °] _{0.04w} [°; °; °; °]] header{0.05h}]),
-        size = (2 * 600 * 1.06, 4 * 300 * 1.07),
-        bottom_margin = 15pt,
+        layout = (@layout [
+            header{0.07h}
+            [_{0.02w} [°; °; °; °] _{0.04w} [°; °; °; °]]
+        ]),
+        size = (2 * 600 * 1.06, 4 * 300 * 1.1),
+        # bottom_margin = 15pt,
         dpi = 150,
     )
     if !isnothing(output)
@@ -852,24 +866,24 @@ function plot_pretty_eels(;
     p
 end
 function plot_focused_eels(;
-    σ::Real = 2,
+    σ::Real = 20,
     output::Union{AbstractString, Nothing} = joinpath(
         paper_folder,
         "plots",
-        "eels_focused_1s_dark.pdf",
+        "Figure_11.pdf",
     ),
 )
-    prefix = joinpath(paper_folder, "analysis.doping_1.34")
+    prefix = joinpath("remote", "Figure_11")
     p = plot(
         xlabel = raw"$\omega\,,\;\mathrm{eV}$",
         ylabel = raw"$-\mathrm{Im}[1/\varepsilon_1(\omega)]$",
         palette = :Set2_8,
-        # yticks = [0, 20, 40, 60],
+        # yticks = ([0, 20, 40, 60], []),
         xlims = (0.78, 1),
-        ylims = (0, 15),
+        # ylims = (0, 15),
         legend = :topleft,
         left_margin = 2mm,
-        size = (640, 480),
+        size = (480, 400),
         dpi = 150,
         fontfamily = "computer modern",
     )
@@ -912,15 +926,16 @@ function plot_focused_eels(;
         if !isnothing(σ)
             loss = hcat([smoothen(loss[:, i]; σ = σ) for i in 1:size(loss, 2)]...)
         end
-        if α == 1
-            loss .+= 0.2
-        end
+        # if α == 1
+        loss .+= (length(filenames) - i) * 3
+        # end
         plot!(
             p,
             frequencies,
             loss,
-            width = 2,
-            color = i,
+            width = i == 1 || i == 3 ? 2 : 3,
+            color = i == 1 || i == 2 ? 2 : 3,
+            linestyle = i == 1 || i == 3 ? :solid : :dot,
             label = raw"$\alpha = " *
                     string(α) *
                     raw"\degree,\;\theta = " *
@@ -928,7 +943,7 @@ function plot_focused_eels(;
                     raw"\degree$",
         )
     end
-    vline!([0.9775 0.795], label = "", lw = 4, color = [1 4], alpha = 0.8, linestyle = :dot)
+    # vline!([0.9775], label = "", lw = 4, color = 1, linestyle = :dot)
     if !isnothing(output)
         savefig(p, output)
     end
@@ -947,8 +962,8 @@ function plot_non_twisted_eigenmodes_appendix(;
     lattice = armchair_bilayer_hexagon(k; rotate = θ)
 
     function picture(ω; type = nothing, kwargs...)
-        # filename = joinpath(paper_folder, "analysis", "combined_loss_k=10_θ=0.h5")
-        filename = "loss_k=10_μ=0_θ=0.h5"
+        filename = joinpath("remote", "Figure_9", "loss_k=10_μ=0.2_θ=0.h5")
+        # filename = "loss_k=10_μ=0_θ=0.h5"
         p = plot_eigenvector_bilayer(
             lattice,
             _extract_eigenmode(ω, filename),
@@ -968,9 +983,25 @@ function plot_non_twisted_eigenmodes_appendix(;
 
     none = plot(ticks = false, border = false, showaxis = false)
 
+    # header = plot(xlims = (0, 1), ylims = (0, 1), ticks = false, showaxis = false)
+    # annotate!(
+    #     header,
+    #     [
+    #         (x, 1.0, Plots.text(t, 24, :top, "computer modern"))
+    #         for (x, t) in [(0.1405, raw"bottom\nlayer"), (0.3765, raw"top\nlayer")]
+    #     ],
+    # )
     header = plot(xlims = (0, 1), ylims = (0, 1), ticks = false, showaxis = false)
     annotate!(
         header,
+        [
+            (x, 1.0, Plots.text(t, 40, :top, "computer modern"))
+            for (x, t) in [(0.258, "(a)"), (0.778, "(b)")]
+        ],
+    )
+    footer = plot(xlims = (0, 1), ylims = (0, 1), ticks = false, showaxis = false)
+    annotate!(
+        footer,
         [
             (x, 1.0, Plots.text(t, 24, :top, "computer modern"))
             for (x, t) in [(0.1405, raw"bottom\nlayer"), (0.3765, raw"top\nlayer")]
@@ -992,7 +1023,12 @@ function plot_non_twisted_eigenmodes_appendix(;
         picture(0.215, alpha = 0.5),
         none,
         picture(0.2493, alpha = 0.5),
-        layout = (@layout [header{0.1h}; [_{0.02w} [°; °; °; °] _{0.04w} [°; °; °; °]]]),
+        footer,
+        layout = (@layout [
+            °{0.05h}
+            [_{0.02w} [°; °; °; °] _{0.04w} [°; °; °; °]]
+            °{0.1h}
+        ]),
         size = (2 * 600 * 1.06, 4 * 300 * 1.1),
         # dpi = 80
     )
@@ -1073,4 +1109,99 @@ function classical_model()
     # @info "E = $(energy(deg2rad(30)))"
     # @info "E = $(energy(deg2rad(60)))"
     plot(0:1:180, energy.(deg2rad.(0:1:180)), xlims = (0, 180))
+end
+
+function _load_dft_dos(filename::AbstractString)
+    table = readdlm(filename)
+    energies = table[:, 1]
+    dos_sp2 = @. table[:, 2] + table[:, 3] + table[:, 5]
+    dos_pz = table[:, 4]
+    return energies, dos_sp2, dos_pz
+end
+function figure_2(;
+    output::Union{AbstractString, Nothing} = joinpath(
+        paper_folder,
+        "plots",
+        "Figure_2.pdf",
+    )
+)
+    energies_aa, dos_aa_sp2, dos_aa_pz = _load_dft_dos(joinpath(
+        "remote",
+        "Figure_2",
+        "02_BL_AA",
+        "H_25_K_18_B_128_d_3.35",
+        "01_DFT",
+        "dosp.001.dat",
+    ))
+    energies_aa .-= 0.28
+    energies_ab, dos_ab_sp2, dos_ab_pz = _load_dft_dos(joinpath(
+        "remote",
+        "Figure_2",
+        "03_BL_AB",
+        "H_25_K_18_B_128_d_3.35",
+        "01_DFT",
+        "dosp.001.dat",
+    ))
+    p_sp2 = plot(
+        energies_ab,
+        smoothen(dos_ab_sp2, σ = 20),
+        labels = raw"$\mathrm{AB}\ sp^2$",
+        linestyle = :solid,
+        linewidth = 2,
+        color = 2,
+        xlabel = raw"$\omega\,,\;\mathrm{eV}$",
+        ylabel = raw"$\mathrm{DOS}\,,\;\mathrm{a.u.}$",
+        palette = :Set2_8,
+        xlims = (-12, 12),
+        yticks = ([0, 0.1, 0.2, 0.3, 0.4, 0.5], []),
+        ylims = (-0.01, 0.50),
+    )
+    plot!(
+        p_sp2,
+        energies_aa,
+        smoothen(dos_aa_sp2, σ = 20),
+        labels = raw"$\mathrm{AA}\ sp^2$",
+        linestyle = :dash,
+        linewidth = 2,
+        color = 3,
+    )
+    annotate!(p_sp2, [(-9.0, 0.45, Plots.text("(a)", :center, 12, "computer modern"))])
+
+    p_pz = plot(
+        energies_ab,
+        smoothen(dos_ab_pz, σ = 2),
+        labels = raw"$\mathrm{AB}\ p_z$",
+        linestyle = :solid,
+        linewidth = 2,
+        color = 2,
+        xlabel = raw"$\omega\,,\;\mathrm{eV}$",
+        ylabel = "", # raw"$\mathrm{DOS}\,,\;\mathrm{a.u.}$",
+        palette = :Set2_8,
+        xlims = (-4, 4),
+        yticks = ([0, 0.05, 0.1, 0.15, 0.20], []),
+        ylims = (-0.004, 0.22),
+    )
+    plot!(
+        p_pz,
+        energies_aa,
+        smoothen(dos_aa_pz, σ = 2),
+        labels = raw"$\mathrm{AA}\ p_z$",
+        linestyle = :solid,
+        linewidth = 2,
+        color = 3,
+    )
+    annotate!(p_pz, [(-3, 0.197, Plots.text("(b)", :center, 12, "computer modern"))])
+
+    p = plot(
+        p_sp2,
+        p_pz,
+        layout = grid(1, 2),
+        size = (520, 220),
+        dpi = 150,
+        fontfamily = "computer modern",
+    )
+    if !isnothing(output)
+        savefig(p, output)
+    end
+    p
 end
