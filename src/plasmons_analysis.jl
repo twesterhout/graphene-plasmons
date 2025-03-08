@@ -145,20 +145,6 @@ function merge_loss_files(
 end
 
 
-function _dielectric(χ::AbstractMatrix{Complex{ℝ}}, V::AbstractMatrix{ℝ}) where {ℝ <: Real}
-    # ℂ = complex(ℝ)
-    if size(χ, 1) != size(χ, 2) || size(χ) != size(V)
-        throw(DimensionMismatch(
-            "dimensions of χ and V do not match: $(size(χ)) != $(size(V)); " *
-            "expected two square matrices of the same size",
-        ))
-    end
-    A = V * real(χ)
-    @inbounds A[diagind(A)] .-= one(ℝ)
-    B = V * imag(χ)
-    return @. -(A + 1im * B)
-end
-
 function compute_leading_eigenvalues(
     filename::AbstractString,
     V::AbstractMatrix;
@@ -276,13 +262,6 @@ function compute_V₀_and_Π₀(; output::AbstractString)
     nothing
 end
 
-function compute_screened_coulomb_interaction(
-    ε::AbstractMatrix{<:Complex},
-    V::AbstractMatrix{<:Real},
-)
-    inverse_ε = inv(ε)
-    real(inverse_ε) * V .+ 1im .* (imag(inverse_ε) * V)
-end
 function compute_screened_coulomb_interaction(
     filename::AbstractString,
     lattice::Lattice,

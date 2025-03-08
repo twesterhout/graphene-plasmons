@@ -1,7 +1,6 @@
 using FFTW
 using HDF5
 using LinearAlgebra
-using Plots
 using LsqFit
 
 function transform_to_real_space(
@@ -52,15 +51,6 @@ function transform_to_real_space(
     return U_r, δR, R₁, R₂, rs
 end
 
-# function multipole_expansion_fit(r, U)
-#     # e / 4πε₀ in eV⋅Å
-#     scale = 14.39964547842567
-#     @. model(r, p) = scale * (p[1] / sqrt(r^2 + p[2]^2)) * (1 + exp(-p[3] * r^2))
-#     fit = curve_fit(model, r, U, [1.0, 0.1, 1.0])
-#     @info "" fit.param
-#     return x -> model(x, fit.param)
-# end
-
 function image_charge_model(ρ, d, ε₁, ε₂, ε₃, δ::Real; maxiter::Integer)
     # e / 4πε₀ in eV⋅Å
     scale = 14.39964547842567
@@ -94,25 +84,9 @@ function image_charge_model_fit(
         fit.param,
     )
 end
-# def get_u_r(r, h, e_m, e_env, d):
-#     n_max = 10
-#     e2 = 14.3999
-#     beta = (e_m - e_env) / (e_m + e_env)
-#
-#     def z(r, n, h, d):
-#         return np.sqrt(r**2. + d**2.0 + (n*h)**2.)
-#
-#     u_r = e2 / (e_m * z(r, 0, h, d))
-#     print(u_r)
-#
-#     for n in range(1, n_max):
-#         print(2. * e2 * beta**n / (e_m * z(r, n, h, d)))
-#         u_r += 2. * e2 * beta**n / (e_m * z(r, n, h, d))
-#
-#     return u_r
 
 function bilayer_graphene_coulomb_model(;
-    filename::AbstractString = joinpath(bilayer_cRPA_folder, "uqr.h5"),
+    filename::AbstractString, # = joinpath(bilayer_cRPA_folder, "uqr.h5"),
     cutoff::Real = 10,
 )
     U_r, δR, R₁, R₂, rs = transform_to_real_space(filename; sublattices = 4)
@@ -136,40 +110,24 @@ end
 bilayer_graphene_coulomb_model(k::Integer, θ::Real; kwargs...) =
     bilayer_graphene_coulomb_model(armchair_bilayer_hexagon(k; rotate = θ); kwargs...)
 
-# function plot_bilayer_graphene_coulomb_model(
-#     filename::AbstractString = "data/03_BL_AB/H_25_K_18_B_128_d_3.35/03_cRPA/uqr.h5",
-# )
-#     U_r, δR, R₁, R₂, rs = transform_to_real_space(filename; sublattices = 4)
-#     _get_table(a, b) = sortslices(
-#         [reshape(view(δR, :, :, a, b), :) reshape(view(U_r, :, :, a, b), :)],
-#         dims = 1,
-#     )
-#     p = plot(
-#         ylabel = raw"$U\,,\;\mathrm{eV}$",
-#         xlabel = raw"$r\,,\;\AA$",
-#         fontfamily = "computer modern",
-#         legend = :topright,
-#         size = (900, 700),
-#         xlims = (0, 10),
-#         ylims = (0, 10),
-#         left_margin = 3mm,
-#         bottom_margin = 1mm,
-#     )
-#     sublattices = ["A", "B", "A'", "B'"]
-#     coulomb = bilayer_graphene_coulomb_model(filename)
-#     x = 0.0:0.01:20
-#     plot!(p, x, coulomb.(x), color = :black, lw = 4, label = raw"Fit")
-# 
-#     a = 1
-#     for b in 1:4
-#         table = _get_table(a, b)
-#         scatter!(p,
-#             table[:, 1],
-#             table[:, 2],
-#             markersize = 5,
-#             color = b,
-#             label = "$(sublattices[a])-$(sublattices[b])",
-#         )
-#     end
-#     p
-# end
+function _dielectric(χ::AbstractMatrix{Complex{ℝ}}, V::AbstractMatrix{ℝ}) where {ℝ <: Real}
+    # ℂ = complex(ℝ)
+    if size(χ, 1) != size(χ, 2) || size(χ) != size(V)
+        throw(DimensionMismatch(
+            "dimensions of χ and V do not match: $(size(χ)) != $(size(V)); " *
+            "expected two square matrices of the same size",
+        ))
+    end
+    A = V * real(χ)
+    @inbounds A[diagind(A)] .-= one(ℝ)
+    B = V * imag(χ)
+    return @. -(A + 1im * B)
+end
+
+function compute_screened_coulomb_interaction(
+    ε::AbstractMatrix{<:Complex},
+    V::AbstractMatrix{<:Real},
+)
+    inverse_ε = inv(ε)
+    real(inverse_ε) * V .+ 1im .* (imag(inverse_ε) * V)
+end

@@ -1,5 +1,10 @@
 using DelimitedFiles
 
+const paper_folder = joinpath(@__DIR__, "..", "paper")
+const bilayer_cRPA_folder =
+    joinpath(paper_folder, "input", "03_BL_AB", "H_25_K_18_B_128_d_3.35", "03_cRPA")
+
+
 function generate_input_file(k::Integer, θ::Real, filename::AbstractString; shift::Real)
     lattice = armchair_bilayer_hexagon(k, rotate = θ)
     hamiltonian = bilayer_graphene_hamiltonian_from_dft(lattice)
